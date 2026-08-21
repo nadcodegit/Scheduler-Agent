@@ -1,0 +1,14 @@
+Subject: Your September schedule is ready
+From: scheduler@example.com
+
+Hello,
+
+Please find your interpretation schedule for September below:
+
+Sep 1, 2026, 09:00-12:00, English
+Sep 2, 2026, 13:00-17:00, English
+Sep 4, 2026, 10:00-14:00, Turkish
+
+Best,
+Scheduler
+

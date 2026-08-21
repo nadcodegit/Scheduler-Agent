@@ -1,0 +1,181 @@
+{
+  "run_id": "68b5e1a5-d173-469a-829e-ae8519e5ac78",
+  "email": {
+    "subject": "Your September schedule is ready",
+    "sender": "scheduler@example.com",
+    "body": "Hello,\n\nPlease find your interpretation schedule for September below:\n\nSep 1, 2026, 09:00-12:00, English\nSep 2, 2026, 13:00-17:00, English\nSep 4, 2026, 10:00-14:00, Turkish\n\nBest,\nScheduler",
+    "attachments": []
+  },
+  "email_type": "schedule",
+  "extracted_events": [
+    {
+      "date": "2026-09-01",
+      "start_time": "09:00:00",
+      "end_time": "12:00:00",
+      "language": "English",
+      "title": "Interpretation",
+      "source": "scheduler@example.com"
+    },
+    {
+      "date": "2026-09-02",
+      "start_time": "13:00:00",
+      "end_time": "17:00:00",
+      "language": "English",
+      "title": "Interpretation",
+      "source": "scheduler@example.com"
+    },
+    {
+      "date": "2026-09-04",
+      "start_time": "10:00:00",
+      "end_time": "14:00:00",
+      "language": "Turkish",
+      "title": "Interpretation",
+      "source": "scheduler@example.com"
+    }
+  ],
+  "validation_errors": [],
+  "approval_required": false,
+  "calendar_events": [
+    {
+      "summary": "Interpretation",
+      "description": "Language: English",
+      "start": {
+        "dateTime": "2026-09-01T09:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-01T12:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    },
+    {
+      "summary": "Interpretation",
+      "description": "Language: English",
+      "start": {
+        "dateTime": "2026-09-02T13:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-02T17:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    },
+    {
+      "summary": "Interpretation",
+      "description": "Language: Turkish",
+      "start": {
+        "dateTime": "2026-09-04T10:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-04T14:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    }
+  ],
+  "memory_snapshot": {
+    "timezone": "Asia/Yerevan",
+    "languages": [
+      "English",
+      "Turkish",
+      "Persian"
+    ],
+    "scheduler_email": "scheduler@example.com",
+    "calendar_name": "Work"
+  },
+  "hooks": [
+    {
+      "name": "before_receive_email",
+      "details": {}
+    },
+    {
+      "name": "after_receive_email",
+      "details": {
+        "subject": "Your September schedule is ready",
+        "sender": "scheduler@example.com"
+      }
+    },
+    {
+      "name": "before_classify_email",
+      "details": {}
+    },
+    {
+      "name": "after_classify_email",
+      "details": {
+        "email_type": "schedule",
+        "mode": "llm"
+      }
+    },
+    {
+      "name": "before_parse_schedule",
+      "details": {}
+    },
+    {
+      "name": "parse_schedule_skipped",
+      "details": {
+        "reason": "already_extracted_by_llm"
+      }
+    },
+    {
+      "name": "before_validate_schedule",
+      "details": {}
+    },
+    {
+      "name": "validate_schedule_skipped",
+      "details": {
+        "reason": "already_validated_by_llm"
+      }
+    },
+    {
+      "name": "before_create_calendar_events",
+      "details": {}
+    },
+    {
+      "name": "after_create_calendar_events",
+      "details": {
+        "event_count": 3
+      }
+    }
+  ],
+  "used_llm": true,
+  "id": "74af9664-9e21-4406-9e7e-b23a54c30452"
+}
