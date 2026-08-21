@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
+from typing import Callable
 
 try:
     from crewai.flow.flow import Flow, listen, router, start
@@ -26,15 +28,37 @@ from scheduler_agents.crews.schedule_crew.crew import llm_is_configured, run_llm
 from scheduler_agents.guardrails.schedule_guardrails import validate_schedule_events
 from scheduler_agents.hooks.event_hooks import record_hook
 from scheduler_agents.memory.user_memory import UserMemory
-from scheduler_agents.models.state import EmailInput, EmailType, ScheduleEvent, SchedulerFlowState
+from scheduler_agents.models.state import CoverageDecision, CoverageSlot, EmailInput, EmailType, ScheduleEvent, SchedulerFlowState
 from scheduler_agents.tools.calendar_tool import build_calendar_event
+from scheduler_agents.tools.coverage_tool import describe_slot, draft_coverage_reply, has_conflict, load_busy_events, parse_coverage_request
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
+
+
+def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
+    """Default human-in-the-loop prompt: ask directly in the terminal.
+
+    A pluggable seam (SchedulerFlow(ask_user=...)) rather than a hardcoded
+    input() call, so tests can inject a canned answer instead of blocking on
+    stdin.
+    """
+
+    print(f"\nCoverage request: {describe_slot(slot)}")
+    if conflict:
+        print("Warning: this overlaps something already on your calendar.")
+    answer = input("Can you cover this shift? (y/n): ").strip().lower()
+    return answer in {"y", "yes"}
 
 
 class SchedulerFlow(Flow[SchedulerFlowState]):
     """V1 CrewAI Flow for schedule email processing."""
 
-    def __init__(self, sample_email_path: str | Path | None = None, memory: UserMemory | None = None):
+    def __init__(
+        self,
+        sample_email_path: str | Path | None = None,
+        memory: UserMemory | None = None,
+        busy_calendar_path: str | Path | None = None,
+        ask_user: Callable[[CoverageSlot, bool], bool] | None = None,
+    ):
         super().__init__()
         # Real crewai Flow instances auto-create self.state (a read-only property)
         # from the Flow[SchedulerFlowState] generic during super().__init__(). The
@@ -42,6 +66,8 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         if getattr(self, "state", None) is None:
             self.state = SchedulerFlowState()
         self.sample_email_path = Path(sample_email_path) if sample_email_path else None
+        self.busy_calendar_path = Path(busy_calendar_path) if busy_calendar_path else None
+        self.ask_user = ask_user or ask_user_can_cover_via_cli
         self.memory = memory or UserMemory()
 
     @start()
@@ -129,8 +155,56 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         record_hook(self.state, "after_create_calendar_events", event_count=len(self.state.calendar_events))
         return self.state.calendar_events
 
+    @listen("coverage_request")
+    def handle_coverage_request(self) -> str | None:
+        """V2: extract the open slot, check it against the busy calendar for
+        context, then ask the human directly whether they can cover it --
+        the conflict check informs the human, it doesn't decide for them.
+
+        y -> draft an accept reply and add the slot to calendar_events.
+        n -> draft a decline reply; calendar is left untouched.
+        """
+
+        record_hook(self.state, "before_handle_coverage_request")
+        email = self._require_email()
+
+        slot = parse_coverage_request(email.body)
+        self.state.coverage_slot = slot
+        self.state.coverage_approval_required = True
+
+        if slot is None:
+            record_hook(self.state, "coverage_request_unparseable")
+            return None
+
+        busy_events = load_busy_events(self.busy_calendar_path) if self.busy_calendar_path else []
+        self.state.coverage_conflict = has_conflict(slot, busy_events)
+
+        can_cover = self.ask_user(slot, self.state.coverage_conflict)
+        self.state.coverage_decision = CoverageDecision.ACCEPT if can_cover else CoverageDecision.DECLINE
+        self.state.coverage_reply_draft = draft_coverage_reply(slot, self.state.coverage_decision)
+
+        if can_cover:
+            schedule_event = ScheduleEvent(
+                date=slot.date,
+                start_time=slot.start_time,
+                end_time=slot.end_time,
+                language=slot.language,
+                title="Interpretation Session (coverage)",
+                source="coverage_request",
+            )
+            timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
+            self.state.calendar_events.append(build_calendar_event(schedule_event, timezone=timezone))
+
+        record_hook(
+            self.state,
+            "after_handle_coverage_request",
+            conflict=self.state.coverage_conflict,
+            decision=self.state.coverage_decision.value,
+        )
+        return self.state.coverage_reply_draft
+
     async def run_v1_async(self) -> SchedulerFlowState:
-        """Deterministic async runner mirroring the CrewAI Flow order for V1."""
+        """Deterministic async runner mirroring the CrewAI Flow order for V1/V2."""
 
         email = self.receive_email()
         email_type = await self.classify_email(email)
@@ -138,6 +212,8 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             events = self.parse_schedule()
             errors = self.validate_schedule(events)
             await self.create_calendar_events(errors)
+        elif email_type == EmailType.COVERAGE_REQUEST:
+            self.handle_coverage_request()
         return self.state
 
     def _read_sample_email(self) -> str:
@@ -172,17 +248,36 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         return self.state.email
 
     def _classify_with_regex(self, email: EmailInput) -> None:
-        """Offline, zero-cost fallback classifier used when no LLM key is configured."""
+        """Offline, zero-cost fallback classifier used when no LLM key is configured.
 
-        text = f"{email.subject}\n{email.body}".lower()
+        Uses word-boundary matching rather than plain substring checks: a
+        naive "schedule" in text also matches inside "Scheduler" (this
+        project's own sender name/signature), which would misclassify every
+        coverage/availability/timesheet email that's signed that way.
 
-        if "schedule" in text:
+        "availability" is ambiguous by itself: a real scheduler email said
+        "We have availability from 11am-5pm, can you stay logged in longer" --
+        that's the scheduler *offering* extra hours (coverage_request), not
+        asking the interpreter to state their own availability
+        (availability_request). Coverage-shaped phrasing is checked first so
+        it wins that overlap; a bare "availability" only falls through to
+        availability_request when none of those more specific signals match.
+        """
+
+        text = f"{email.subject}\n{email.body}"
+
+        coverage_re = (
+            r"\bcover(age|ing)?\b|\bavailable slot\b|\badditional hours?\b|\bextra hours?\b"
+            r"|\bstay (logged in|online) (a bit )?longer\b|\bwe have availability\b"
+        )
+
+        if re.search(r"\bschedule\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.SCHEDULE
-        elif "cover" in text or "available slot" in text:
+        elif re.search(coverage_re, text, re.IGNORECASE):
             self.state.email_type = EmailType.COVERAGE_REQUEST
-        elif "availability" in text:
+        elif re.search(r"\bavailability\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.AVAILABILITY_REQUEST
-        elif "hours" in text or "timesheet" in text:
+        elif re.search(r"\bhours\b|\btimesheet\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.TIMESHEET
         else:
             self.state.email_type = EmailType.OTHER

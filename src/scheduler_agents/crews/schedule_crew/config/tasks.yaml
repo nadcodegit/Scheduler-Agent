@@ -6,6 +6,23 @@ classify_email:
     Email:
     {email}
 
+    Label definitions -- read carefully, "availability" is used in two
+    different senses in real scheduler emails:
+
+    - schedule: the scheduler is sending a finalized table/list of upcoming
+      interpretation sessions.
+    - coverage_request: the scheduler has open/extra hours and is asking the
+      interpreter to pick them up -- including phrasing like "we have
+      availability from X-Y, can you stay logged in longer / take additional
+      hours / cover this". The scheduler is OFFERING time here, even though
+      the word "availability" appears.
+    - availability_request: the scheduler is asking the interpreter to STATE
+      their own availability for an upcoming period (e.g. "please send your
+      availability for next month"). The interpreter's schedule is what's
+      being asked about, not offered.
+    - timesheet: monthly hours/payment totals to be confirmed or filled in.
+    - other: anything that doesn't fit the above.
+
     Return one label only:
     schedule, coverage_request, availability_request, timesheet, or other.
   expected_output: >

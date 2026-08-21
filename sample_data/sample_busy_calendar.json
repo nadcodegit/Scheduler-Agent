@@ -1,0 +1,18 @@
+[
+  {
+    "date": "2026-09-10",
+    "start_time": "15:00",
+    "end_time": "17:00",
+    "language": "English",
+    "title": "Interpretation Session",
+    "source": "existing_calendar"
+  },
+  {
+    "date": "2026-09-12",
+    "start_time": "09:00",
+    "end_time": "11:00",
+    "language": "Persian",
+    "title": "Interpretation Session",
+    "source": "existing_calendar"
+  }
+]

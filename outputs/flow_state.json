@@ -1,100 +1,25 @@
 {
-  "run_id": "68b5e1a5-d173-469a-829e-ae8519e5ac78",
+  "run_id": "7460e23a-21fa-435e-a6c1-5f75de7e47ea",
   "email": {
-    "subject": "Your September schedule is ready",
+    "subject": "Coverage needed - Sep 10 slot",
     "sender": "scheduler@example.com",
-    "body": "Hello,\n\nPlease find your interpretation schedule for September below:\n\nSep 1, 2026, 09:00-12:00, English\nSep 2, 2026, 13:00-17:00, English\nSep 4, 2026, 10:00-14:00, Turkish\n\nBest,\nScheduler",
+    "body": "Hi,\n\nWe have an open interpretation slot and wanted to check your availability:\n\nSep 10, 2026, 14:00-16:00, English\n\nCan you cover it?\n\nBest,\nScheduler",
     "attachments": []
   },
-  "email_type": "schedule",
-  "extracted_events": [
-    {
-      "date": "2026-09-01",
-      "start_time": "09:00:00",
-      "end_time": "12:00:00",
-      "language": "English",
-      "title": "Interpretation",
-      "source": "scheduler@example.com"
-    },
-    {
-      "date": "2026-09-02",
-      "start_time": "13:00:00",
-      "end_time": "17:00:00",
-      "language": "English",
-      "title": "Interpretation",
-      "source": "scheduler@example.com"
-    },
-    {
-      "date": "2026-09-04",
-      "start_time": "10:00:00",
-      "end_time": "14:00:00",
-      "language": "Turkish",
-      "title": "Interpretation",
-      "source": "scheduler@example.com"
-    }
-  ],
+  "email_type": "coverage_request",
+  "extracted_events": [],
   "validation_errors": [],
   "approval_required": false,
   "calendar_events": [
     {
-      "summary": "Interpretation",
+      "summary": "Interpretation Session (coverage)",
       "description": "Language: English",
       "start": {
-        "dateTime": "2026-09-01T09:00:00",
+        "dateTime": "2026-09-10T14:00:00",
         "timeZone": "Asia/Yerevan"
       },
       "end": {
-        "dateTime": "2026-09-01T12:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    },
-    {
-      "summary": "Interpretation",
-      "description": "Language: English",
-      "start": {
-        "dateTime": "2026-09-02T13:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-02T17:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    },
-    {
-      "summary": "Interpretation",
-      "description": "Language: Turkish",
-      "start": {
-        "dateTime": "2026-09-04T10:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-04T14:00:00",
+        "dateTime": "2026-09-10T16:00:00",
         "timeZone": "Asia/Yerevan"
       },
       "reminders": {
@@ -130,7 +55,7 @@
     {
       "name": "after_receive_email",
       "details": {
-        "subject": "Your September schedule is ready",
+        "subject": "Coverage needed - Sep 10 slot",
         "sender": "scheduler@example.com"
       }
     },
@@ -141,41 +66,33 @@
     {
       "name": "after_classify_email",
       "details": {
-        "email_type": "schedule",
+        "email_type": "coverage_request",
         "mode": "llm"
       }
     },
     {
-      "name": "before_parse_schedule",
+      "name": "before_handle_coverage_request",
       "details": {}
     },
     {
-      "name": "parse_schedule_skipped",
+      "name": "after_handle_coverage_request",
       "details": {
-        "reason": "already_extracted_by_llm"
-      }
-    },
-    {
-      "name": "before_validate_schedule",
-      "details": {}
-    },
-    {
-      "name": "validate_schedule_skipped",
-      "details": {
-        "reason": "already_validated_by_llm"
-      }
-    },
-    {
-      "name": "before_create_calendar_events",
-      "details": {}
-    },
-    {
-      "name": "after_create_calendar_events",
-      "details": {
-        "event_count": 3
+        "conflict": true,
+        "decision": "accept"
       }
     }
   ],
   "used_llm": true,
-  "id": "74af9664-9e21-4406-9e7e-b23a54c30452"
+  "coverage_slot": {
+    "date": "2026-09-10",
+    "start_time": "14:00:00",
+    "end_time": "16:00:00",
+    "language": "English",
+    "source": "email"
+  },
+  "coverage_conflict": true,
+  "coverage_decision": "accept",
+  "coverage_reply_draft": "Hi,\n\nI'm available to cover the 2026-09-10 14:00-16:00 (English) slot. Please confirm and I'll be online.\n\nBest,\n[Your name]",
+  "coverage_approval_required": true,
+  "id": "e679d82b-a249-41ac-8f7b-7456afcb881f"
 }

@@ -2,13 +2,31 @@
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
 
-## First Milestone
+## Milestones
 
 V1 focuses on the safest useful path:
 
 ```text
 sample email -> classify email -> parse schedule -> validate events -> calendar-ready events
 ```
+
+V2 adds the coverage-request workflow: an open-slot email is parsed and
+checked for conflicts against the user's existing calendar, then a human is
+asked directly -- "Can you cover this shift? (y/n)" -- rather than the system
+deciding on its own. The conflict check is shown as context, not used to
+auto-decide. A "yes" drafts an accept reply and adds the slot to
+`calendar_events`; a "no" drafts a decline and leaves the calendar untouched.
+The reply is always a draft -- nothing is ever sent automatically.
+
+```text
+coverage email -> parse slot -> check conflict -> ask human (y/n) -> draft reply + (if yes) update calendar
+```
+
+This step is deliberately a plain terminal prompt rather than a notification
+service (Telegram, email, etc.): a real async notification/response loop is
+a legitimate future upgrade, but it's a separate infrastructure concern from
+"the agent asks before deciding," and adding it now would be solving a
+problem this project doesn't have yet.
 
 The project is intentionally designed with:
 
@@ -30,7 +48,10 @@ scheduler-agents/
 ├── .env.example
 ├── README.md
 ├── sample_data/
-│   └── sample_schedule_email.txt
+│   ├── sample_schedule_email.txt
+│   ├── sample_coverage_request_email.txt
+│   ├── sample_availability_request_email.txt
+│   └── sample_busy_calendar.json
 ├── src/
 │   └── scheduler_agents/
 │       ├── main.py
@@ -54,9 +75,12 @@ scheduler-agents/
 │       │   └── state.py
 │       └── tools/
 │           ├── calendar_tool.py
+│           ├── coverage_tool.py
 │           └── schedule_parser_tool.py
 └── tests/
-    └── test_scheduler_flow_units.py
+    ├── conftest.py
+    ├── test_scheduler_flow_units.py
+    └── test_coverage_workflow.py
 ```
 
 ## Two run modes
@@ -88,6 +112,12 @@ uv sync
 uv run python -m scheduler_agents.main
 ```
 
+Run the coverage-request path instead:
+
+```bash
+uv run python -m scheduler_agents.main --sample sample_coverage_request_email.txt
+```
+
 For a quick run without installing the package first:
 
 ```powershell
@@ -117,12 +147,24 @@ API being up.
 ## Next Steps
 
 1. Replace the sample email input with Gmail or Outlook ingestion.
-2. Replace the dry-run calendar tool with Google Calendar or Outlook Calendar.
-3. Add human approval UI for coverage and timesheet actions.
-4. Add CrewAI eval cases for classification, parsing, and safe tool use.
-5. Split classification from extraction so the extractor/validator agents
+2. Replace the dry-run calendar tool with Google Calendar or Outlook Calendar,
+   and load the busy-calendar check (V2) from the real calendar instead of
+   `sample_busy_calendar.json`.
+3. Move the coverage-request y/n prompt off the terminal onto an actual
+   notification channel (e.g. Telegram) so it doesn't require the flow to be
+   running interactively -- this needs an async "ask now, resume later"
+   design (persisted pending-decision state, polling/webhook for the
+   response), not just swapping `input()` for an API call.
+4. Improve coverage-slot extraction to handle loosely-worded, date-less
+   requests (e.g. "stay logged in until 5pm today", 12-hour times) -- these
+   currently fail to parse with either the regex fallback or the LLM path,
+   since neither resolves relative dates like "today".
+5. Add CrewAI eval cases for classification, parsing, and safe tool use.
+6. Split classification from extraction so the extractor/validator agents
    only run once an email is already known to be a schedule email, instead
    of always running the full three-task crew.
+7. V4: monthly availability requests -> structured availability -> drafted
+   reply to the scheduler (same draft-only, human-approves pattern as V2).
 
 ## Course-Style CrewAI Pieces
 

@@ -23,12 +23,15 @@ class EmailInput(BaseModel):
     attachments: list[str] = Field(default_factory=list)
 
 
-class ScheduleEvent(BaseModel):
+class TimeSlot(BaseModel):
+    """A single date/start/end/language slot, shared by schedule events and
+    coverage requests -- both are "one block of interpretation time", just
+    reached through different email types."""
+
     date: date
     start_time: time
     end_time: time
     language: str | None = None
-    title: str = "Interpretation Session"
     source: str = "email"
 
     @field_validator("end_time")
@@ -38,6 +41,19 @@ class ScheduleEvent(BaseModel):
         if start_time and end_time <= start_time:
             raise ValueError("end_time must be after start_time")
         return end_time
+
+
+class ScheduleEvent(TimeSlot):
+    title: str = "Interpretation Session"
+
+
+class CoverageDecision(StrEnum):
+    ACCEPT = "accept"
+    DECLINE = "decline"
+
+
+class CoverageSlot(TimeSlot):
+    pass
 
 
 class FlowEvent(BaseModel):
@@ -56,4 +72,11 @@ class SchedulerFlowState(BaseModel):
     memory_snapshot: dict[str, Any] = Field(default_factory=dict)
     hooks: list[FlowEvent] = Field(default_factory=list)
     used_llm: bool = False
+
+    # Coverage-request workflow (V2)
+    coverage_slot: CoverageSlot | None = None
+    coverage_conflict: bool = False
+    coverage_decision: CoverageDecision | None = None
+    coverage_reply_draft: str | None = None
+    coverage_approval_required: bool = False
 
