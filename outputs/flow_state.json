@@ -1,42 +1,16 @@
 {
-  "run_id": "7460e23a-21fa-435e-a6c1-5f75de7e47ea",
+  "run_id": "8524ed33-e798-47f5-abc9-ee5df8f0cbe3",
   "email": {
-    "subject": "Coverage needed - Sep 10 slot",
+    "subject": "Your Purchase Order",
     "sender": "scheduler@example.com",
-    "body": "Hi,\n\nWe have an open interpretation slot and wanted to check your availability:\n\nSep 10, 2026, 14:00-16:00, English\n\nCan you cover it?\n\nBest,\nScheduler",
+    "body": "Hi,\n\nPlease find attached the Purchase Order for the work assigned to you, specifying your data, description of job, deadlines, detailed calculation and total value of this order as well as final legal statements.\n\nPlease confirm the receipt of the PO and accuracy of all the data.\n\nThanks!\n\nBest regards,",
     "attachments": []
   },
-  "email_type": "coverage_request",
+  "email_type": "timesheet",
   "extracted_events": [],
   "validation_errors": [],
   "approval_required": false,
-  "calendar_events": [
-    {
-      "summary": "Interpretation Session (coverage)",
-      "description": "Language: English",
-      "start": {
-        "dateTime": "2026-09-10T14:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-10T16:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    }
-  ],
+  "calendar_events": [],
   "memory_snapshot": {
     "timezone": "Asia/Yerevan",
     "languages": [
@@ -45,7 +19,8 @@
       "Persian"
     ],
     "scheduler_email": "scheduler@example.com",
-    "calendar_name": "Work"
+    "calendar_name": "Work",
+    "vendor_id": "000000"
   },
   "hooks": [
     {
@@ -55,7 +30,7 @@
     {
       "name": "after_receive_email",
       "details": {
-        "subject": "Coverage needed - Sep 10 slot",
+        "subject": "Your Purchase Order",
         "sender": "scheduler@example.com"
       }
     },
@@ -66,33 +41,38 @@
     {
       "name": "after_classify_email",
       "details": {
-        "email_type": "coverage_request",
+        "email_type": "timesheet",
         "mode": "llm"
       }
     },
     {
-      "name": "before_handle_coverage_request",
+      "name": "before_handle_timesheet",
       "details": {}
     },
     {
-      "name": "after_handle_coverage_request",
+      "name": "after_handle_timesheet",
       "details": {
-        "conflict": true,
-        "decision": "accept"
+        "job_id": "2026/1234/#1/1",
+        "period": "September 2026"
       }
     }
   ],
   "used_llm": true,
-  "coverage_slot": {
-    "date": "2026-09-10",
-    "start_time": "14:00:00",
-    "end_time": "16:00:00",
-    "language": "English",
-    "source": "email"
+  "coverage_slot": null,
+  "coverage_conflict": false,
+  "coverage_decision": null,
+  "coverage_reply_draft": null,
+  "coverage_approval_required": false,
+  "availability_period": null,
+  "availability_statement": null,
+  "availability_reply_draft": null,
+  "availability_approval_required": false,
+  "timesheet_data": {
+    "job_id": "2026/1234/#1/1",
+    "period": "September 2026",
+    "total_amount": 100.0
   },
-  "coverage_conflict": true,
-  "coverage_decision": "accept",
-  "coverage_reply_draft": "Hi,\n\nI'm available to cover the 2026-09-10 14:00-16:00 (English) slot. Please confirm and I'll be online.\n\nBest,\n[Your name]",
-  "coverage_approval_required": true,
-  "id": "e679d82b-a249-41ac-8f7b-7456afcb881f"
+  "invoice_output_path": "C:\\Users\\ZenBook\\OneDrive\\Documents\\New project\\scheduler-agents\\outputs\\INVOICE September 2026.docx",
+  "timesheet_approval_required": true,
+  "id": "f2deb553-4597-4c6c-8649-90a0f0b370f2"
 }

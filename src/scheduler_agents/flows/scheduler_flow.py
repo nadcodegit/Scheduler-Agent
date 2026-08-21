@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import date
 from pathlib import Path
 from typing import Callable
 
@@ -29,9 +30,12 @@ from scheduler_agents.guardrails.schedule_guardrails import validate_schedule_ev
 from scheduler_agents.hooks.event_hooks import record_hook
 from scheduler_agents.memory.user_memory import UserMemory
 from scheduler_agents.models.state import CoverageDecision, CoverageSlot, EmailInput, EmailType, ScheduleEvent, SchedulerFlowState
+from scheduler_agents.tools.availability_tool import draft_availability_reply, extract_requested_period
 from scheduler_agents.tools.calendar_tool import build_calendar_event
 from scheduler_agents.tools.coverage_tool import describe_slot, draft_coverage_reply, has_conflict, load_busy_events, parse_coverage_request
+from scheduler_agents.tools.invoice_tool import fill_invoice_template
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
+from scheduler_agents.tools.timesheet_tool import parse_purchase_order_pdf
 
 
 def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
@@ -49,6 +53,18 @@ def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
     return answer in {"y", "yes"}
 
 
+def ask_availability_via_cli(period: str | None) -> str:
+    """Default human-in-the-loop prompt for availability requests.
+
+    Same pluggable-seam pattern as ask_user_can_cover_via_cli: a real
+    terminal prompt by default, overridable in SchedulerFlow(ask_availability=...)
+    so tests don't block on stdin.
+    """
+
+    period_desc = period or "the requested period"
+    return input(f"\nWhat's your availability for {period_desc}? ").strip()
+
+
 class SchedulerFlow(Flow[SchedulerFlowState]):
     """V1 CrewAI Flow for schedule email processing."""
 
@@ -58,6 +74,10 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         memory: UserMemory | None = None,
         busy_calendar_path: str | Path | None = None,
         ask_user: Callable[[CoverageSlot, bool], bool] | None = None,
+        ask_availability: Callable[[str | None], str] | None = None,
+        timesheet_pdf_path: str | Path | None = None,
+        invoice_template_path: str | Path | None = None,
+        invoice_output_dir: str | Path | None = None,
     ):
         super().__init__()
         # Real crewai Flow instances auto-create self.state (a read-only property)
@@ -68,6 +88,10 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         self.sample_email_path = Path(sample_email_path) if sample_email_path else None
         self.busy_calendar_path = Path(busy_calendar_path) if busy_calendar_path else None
         self.ask_user = ask_user or ask_user_can_cover_via_cli
+        self.ask_availability = ask_availability or ask_availability_via_cli
+        self.timesheet_pdf_path = Path(timesheet_pdf_path) if timesheet_pdf_path else None
+        self.invoice_template_path = Path(invoice_template_path) if invoice_template_path else None
+        self.invoice_output_dir = Path(invoice_output_dir) if invoice_output_dir else None
         self.memory = memory or UserMemory()
 
     @start()
@@ -203,8 +227,78 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         )
         return self.state.coverage_reply_draft
 
+    @listen("availability_request")
+    def handle_availability_request(self) -> str:
+        """V3: figure out which period is being asked about, ask the human
+        to state their availability for it, and draft a reply.
+
+        Unlike coverage requests there's nothing to auto-decide here -- the
+        scheduler is asking a genuinely open question, so this always asks
+        and always drafts. The draft still requires human approval before
+        it's actually sent (this flow never sends anything itself).
+        """
+
+        record_hook(self.state, "before_handle_availability_request")
+        email = self._require_email()
+
+        period = extract_requested_period(email.body)
+        self.state.availability_period = period
+
+        statement = self.ask_availability(period)
+        self.state.availability_statement = statement
+        self.state.availability_reply_draft = draft_availability_reply(period, statement)
+        self.state.availability_approval_required = True
+
+        record_hook(self.state, "after_handle_availability_request", period=period)
+        return self.state.availability_reply_draft
+
+    @listen("timesheet")
+    def handle_timesheet(self) -> str | None:
+        """V4: the vendor's monthly notification email body carries no
+        usable data ("please find attached the Purchase Order..."); job id,
+        period, and amount all live in the attached PDF, so this reads that
+        PDF directly rather than email.body like the other handlers.
+
+        Fills the fixed invoice template's known monthly-varying cells
+        (invoice number, date, job id, amount/total) and saves a new .docx
+        locally -- it never uploads or submits anything. The human reviews
+        and submits it to the vendor platform themselves.
+        """
+
+        record_hook(self.state, "before_handle_timesheet")
+
+        if self.timesheet_pdf_path is None or not self.timesheet_pdf_path.exists():
+            record_hook(self.state, "timesheet_pdf_missing")
+            return None
+
+        data = parse_purchase_order_pdf(self.timesheet_pdf_path)
+        self.state.timesheet_data = data
+
+        if data is None:
+            record_hook(self.state, "timesheet_pdf_unparseable")
+            return None
+
+        if self.invoice_template_path is None or self.invoice_output_dir is None:
+            record_hook(self.state, "invoice_template_or_output_dir_missing")
+            return None
+
+        vendor_id = str(self.state.memory_snapshot.get("vendor_id", "000000"))
+        output_path = self.invoice_output_dir / f"INVOICE {data.period}.docx"
+        fill_invoice_template(
+            self.invoice_template_path,
+            output_path,
+            data,
+            vendor_id=vendor_id,
+            invoice_date=date.today(),
+        )
+        self.state.invoice_output_path = str(output_path)
+        self.state.timesheet_approval_required = True
+
+        record_hook(self.state, "after_handle_timesheet", job_id=data.job_id, period=data.period)
+        return str(output_path)
+
     async def run_v1_async(self) -> SchedulerFlowState:
-        """Deterministic async runner mirroring the CrewAI Flow order for V1/V2."""
+        """Deterministic async runner mirroring the CrewAI Flow order for V1/V2/V3/V4."""
 
         email = self.receive_email()
         email_type = await self.classify_email(email)
@@ -214,6 +308,10 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             await self.create_calendar_events(errors)
         elif email_type == EmailType.COVERAGE_REQUEST:
             self.handle_coverage_request()
+        elif email_type == EmailType.AVAILABILITY_REQUEST:
+            self.handle_availability_request()
+        elif email_type == EmailType.TIMESHEET:
+            self.handle_timesheet()
         return self.state
 
     def _read_sample_email(self) -> str:
@@ -277,7 +375,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             self.state.email_type = EmailType.COVERAGE_REQUEST
         elif re.search(r"\bavailability\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.AVAILABILITY_REQUEST
-        elif re.search(r"\bhours\b|\btimesheet\b", text, re.IGNORECASE):
+        elif re.search(r"\bhours\b|\btimesheet\b|\bpurchase order\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.TIMESHEET
         else:
             self.state.email_type = EmailType.OTHER

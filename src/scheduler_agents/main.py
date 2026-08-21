@@ -42,7 +42,15 @@ def main() -> None:
         sample_email = project_root / "sample_data" / sample_email
 
     busy_calendar = project_root / "sample_data" / "sample_busy_calendar.json"
-    flow = SchedulerFlow(sample_email_path=sample_email, busy_calendar_path=busy_calendar)
+    timesheet_pdf = project_root / "sample_data" / "sample_purchase_order.pdf"
+    invoice_template = project_root / "sample_data" / "invoice_template.docx"
+    flow = SchedulerFlow(
+        sample_email_path=sample_email,
+        busy_calendar_path=busy_calendar,
+        timesheet_pdf_path=timesheet_pdf,
+        invoice_template_path=invoice_template,
+        invoice_output_dir=project_root / "outputs",
+    )
     state = asyncio.run(flow.run_v1_async())
     output_paths = write_flow_outputs(state, project_root / "outputs")
 
@@ -64,6 +72,14 @@ def main() -> None:
         print(f"Reply draft:\n{state.coverage_reply_draft}")
         if state.coverage_decision == "accept":
             print(f"Added to calendar_events: {state.calendar_events[-1]}")
+    elif state.email_type == "availability_request":
+        print(f"Requested period: {state.availability_period}")
+        print(f"Approval required before sending: {state.availability_approval_required}")
+        print(f"Reply draft:\n{state.availability_reply_draft}")
+    elif state.email_type == "timesheet":
+        print(f"Timesheet data: {state.timesheet_data}")
+        print(f"Approval required before submitting: {state.timesheet_approval_required}")
+        print(f"Filled invoice saved to: {state.invoice_output_path}")
 
     print(f"Saved calendar payloads: {output_paths['calendar_payloads']}")
     print(f"Saved flow state: {output_paths['flow_state']}")

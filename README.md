@@ -28,6 +28,31 @@ a legitimate future upgrade, but it's a separate infrastructure concern from
 "the agent asks before deciding," and adding it now would be solving a
 problem this project doesn't have yet.
 
+V3 adds the availability-request workflow: the scheduler asks for the
+interpreter's availability for a period (e.g. "your June availability"),
+so unlike V1/V2 there's nothing to extract a decision from -- the flow
+figures out which period is being asked about, asks the human to state
+their availability for it, and drafts the reply. Same rules as V2: always a
+draft, human approves and sends it.
+
+```text
+availability email -> extract period -> ask human for availability -> draft reply (never sent)
+```
+
+V4 adds the timesheet/invoice workflow. Here the vendor's monthly
+notification email body carries no usable data at all ("please find
+attached the Purchase Order...") -- job id, period, and amount all live in
+the attached PDF, so this is the one workflow that reads a PDF directly
+instead of `email.body`. It fills only the known monthly-varying cells in a
+fixed Word invoice template (invoice number, date, job id, amount/total) and
+saves a new `.docx` locally -- it never uploads or submits anything to the
+vendor platform; the human reviews and submits it themselves. Every static
+field (name, address, bank details, bill-to) is left untouched.
+
+```text
+purchase-order PDF -> extract job id/period/amount -> fill invoice template -> save .docx (never submitted)
+```
+
 The project is intentionally designed with:
 
 - CrewAI Flow orchestration
@@ -51,7 +76,10 @@ scheduler-agents/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
 │   ├── sample_availability_request_email.txt
-│   └── sample_busy_calendar.json
+│   ├── sample_purchase_order_email.txt
+│   ├── sample_purchase_order.pdf
+│   ├── sample_busy_calendar.json
+│   └── invoice_template.docx
 ├── src/
 │   └── scheduler_agents/
 │       ├── main.py
@@ -74,13 +102,18 @@ scheduler-agents/
 │       ├── models/
 │       │   └── state.py
 │       └── tools/
+│           ├── availability_tool.py
 │           ├── calendar_tool.py
 │           ├── coverage_tool.py
-│           └── schedule_parser_tool.py
+│           ├── invoice_tool.py
+│           ├── schedule_parser_tool.py
+│           └── timesheet_tool.py
 └── tests/
     ├── conftest.py
     ├── test_scheduler_flow_units.py
-    └── test_coverage_workflow.py
+    ├── test_coverage_workflow.py
+    ├── test_availability_workflow.py
+    └── test_timesheet_workflow.py
 ```
 
 ## Two run modes
@@ -116,6 +149,21 @@ Run the coverage-request path instead:
 
 ```bash
 uv run python -m scheduler_agents.main --sample sample_coverage_request_email.txt
+```
+
+Run the availability-request path (it will prompt you in the terminal for
+your availability):
+
+```bash
+uv run python -m scheduler_agents.main --sample sample_availability_request_email.txt
+```
+
+Run the timesheet/invoice path (fills `sample_data/invoice_template.docx`
+from `sample_data/sample_purchase_order.pdf` and saves the result to
+`outputs/`):
+
+```bash
+uv run python -m scheduler_agents.main --sample sample_purchase_order_email.txt
 ```
 
 For a quick run without installing the package first:
@@ -163,8 +211,11 @@ API being up.
 6. Split classification from extraction so the extractor/validator agents
    only run once an email is already known to be a schedule email, instead
    of always running the full three-task crew.
-7. V4: monthly availability requests -> structured availability -> drafted
-   reply to the scheduler (same draft-only, human-approves pattern as V2).
+7. Read the vendor's real PDF attachment straight from Gmail/Outlook instead
+   of a local `timesheet_pdf_path`, once real email ingestion (item 1) lands.
+8. Extend PDF extraction with an LLM fallback for purchase orders that don't
+   match this template's exact layout (job id format, "Total" line wording),
+   the same way schedule extraction already has an LLM path alongside regex.
 
 ## Course-Style CrewAI Pieces
 

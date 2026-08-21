@@ -11,6 +11,7 @@ class UserMemory:
     languages: list[str] = field(default_factory=lambda: ["English", "Turkish", "Persian"])
     scheduler_email: str = "scheduler@example.com"
     calendar_name: str = "Work"
+    vendor_id: str = "000000"
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -18,5 +19,6 @@ class UserMemory:
             "languages": list(self.languages),
             "scheduler_email": self.scheduler_email,
             "calendar_name": self.calendar_name,
+            "vendor_id": self.vendor_id,
         }
 

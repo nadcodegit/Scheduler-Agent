@@ -1,0 +1,12 @@
+Subject: Your Purchase Order
+From: scheduler@example.com
+
+Hi,
+
+Please find attached the Purchase Order for the work assigned to you, specifying your data, description of job, deadlines, detailed calculation and total value of this order as well as final legal statements.
+
+Please confirm the receipt of the PO and accuracy of all the data.
+
+Thanks!
+
+Best regards,

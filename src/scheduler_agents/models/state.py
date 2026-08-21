@@ -56,6 +56,15 @@ class CoverageSlot(TimeSlot):
     pass
 
 
+class TimesheetData(BaseModel):
+    """Extracted from the vendor's monthly Purchase Order PDF -- the email
+    body carries no usable data, only this attachment does."""
+
+    job_id: str
+    period: str
+    total_amount: float
+
+
 class FlowEvent(BaseModel):
     name: str
     details: dict[str, Any] = Field(default_factory=dict)
@@ -79,4 +88,15 @@ class SchedulerFlowState(BaseModel):
     coverage_decision: CoverageDecision | None = None
     coverage_reply_draft: str | None = None
     coverage_approval_required: bool = False
+
+    # Availability-request workflow (V3)
+    availability_period: str | None = None
+    availability_statement: str | None = None
+    availability_reply_draft: str | None = None
+    availability_approval_required: bool = False
+
+    # Timesheet/invoice workflow (V4)
+    timesheet_data: TimesheetData | None = None
+    invoice_output_path: str | None = None
+    timesheet_approval_required: bool = False
 
