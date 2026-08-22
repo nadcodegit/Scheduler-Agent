@@ -10,7 +10,11 @@ classify_email:
     different senses in real scheduler emails:
 
     - schedule: the scheduler is sending a finalized table/list of upcoming
-      interpretation sessions.
+      interpretation sessions. Vendors often call this a "roster" or "rota"
+      instead of "schedule" -- treat those as the same thing. The actual
+      slot data may be in an attached table/image rather than the email
+      text; classify as schedule regardless of whether the body itself
+      contains parseable dates.
     - coverage_request: the scheduler has open/extra hours and is asking the
       interpreter to pick them up -- including phrasing like "we have
       availability from X-Y, can you stay logged in longer / take additional
@@ -20,10 +24,14 @@ classify_email:
       their own availability for an upcoming period (e.g. "please send your
       availability for next month"). The interpreter's schedule is what's
       being asked about, not offered.
-    - timesheet: monthly hours/payment totals to be confirmed or filled in --
+    - timesheet: monthly hours/payment TOTALS to be confirmed or filled in --
       including "Purchase Order" notifications, even when the email body
       itself is generic ("please find attached the Purchase Order..."); the
       actual hours/amount data lives in the PDF attachment, not the body.
+      A schedule/roster email mentioning "hours" in the time-of-day sense
+      (e.g. "do not log in during these hours") is NOT a timesheet --
+      only classify as timesheet when hours means a worked-hours total or
+      payment calculation.
     - other: anything that doesn't fit the above.
 
     Return one label only:

@@ -1,12 +1,12 @@
 {
-  "run_id": "8524ed33-e798-47f5-abc9-ee5df8f0cbe3",
+  "run_id": "19baa3f2-c60d-4a01-abca-4fb600d6d3de",
   "email": {
-    "subject": "Your Purchase Order",
+    "subject": "Coverage needed in April",
     "sender": "scheduler@example.com",
-    "body": "Hi,\n\nPlease find attached the Purchase Order for the work assigned to you, specifying your data, description of job, deadlines, detailed calculation and total value of this order as well as final legal statements.\n\nPlease confirm the receipt of the PO and accuracy of all the data.\n\nThanks!\n\nBest regards,",
+    "body": "Dear interpreters,\n\nwe would need your help to cover below hours in April. Please let me know if you could help to cover some hours.\n\n* Monday-Wednesday: 11 am - 1 pm UK time\n\nPlease let me know if you would like to cover only specific dates or half an hour. Any help is highly appreciated!\n\nAdditionally, we have below availability for specific dates, all in UK time:\n\n* April 8: 3-4 pm\n* April 9: 10 am -12 pm and 1-2 pm\n* April 21: 10-11 am\n* April 23: 12-1 pm\n* April 29, 30: 10-11 am\n\nThank you and best regards,",
     "attachments": []
   },
-  "email_type": "timesheet",
+  "email_type": "coverage_request",
   "extracted_events": [],
   "validation_errors": [],
   "approval_required": false,
@@ -30,7 +30,7 @@
     {
       "name": "after_receive_email",
       "details": {
-        "subject": "Your Purchase Order",
+        "subject": "Coverage needed in April",
         "sender": "scheduler@example.com"
       }
     },
@@ -39,40 +39,46 @@
       "details": {}
     },
     {
-      "name": "after_classify_email",
+      "name": "llm_pipeline_failed",
       "details": {
-        "email_type": "timesheet",
-        "mode": "llm"
+        "error": "litellm.RateLimitError: RateLimitError: GroqException - {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01m0g6g4kmetqv0r2kstmpa1dk` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5650, Requested 2701. Please try again in 2.6325s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
       }
     },
     {
-      "name": "before_handle_timesheet",
+      "name": "after_classify_email",
+      "details": {
+        "email_type": "coverage_request",
+        "mode": "regex"
+      }
+    },
+    {
+      "name": "before_handle_coverage_request",
       "details": {}
     },
     {
-      "name": "after_handle_timesheet",
+      "name": "coverage_llm_extraction_failed",
       "details": {
-        "job_id": "2026/1234/#1/1",
-        "period": "September 2026"
+        "error": "litellm.RateLimitError: RateLimitError: GroqException - {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01m0g6g4kmetqv0r2kstmpa1dk` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5629, Requested 2538. Please try again in 1.2525s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
       }
+    },
+    {
+      "name": "coverage_request_unparseable",
+      "details": {}
     }
   ],
-  "used_llm": true,
-  "coverage_slot": null,
-  "coverage_conflict": false,
-  "coverage_decision": null,
+  "used_llm": false,
+  "roster_timezone_label": null,
+  "coverage_slots": [],
+  "coverage_decisions": [],
   "coverage_reply_draft": null,
-  "coverage_approval_required": false,
+  "coverage_approval_required": true,
+  "coverage_unstructured_note": null,
   "availability_period": null,
   "availability_statement": null,
   "availability_reply_draft": null,
   "availability_approval_required": false,
-  "timesheet_data": {
-    "job_id": "2026/1234/#1/1",
-    "period": "September 2026",
-    "total_amount": 100.0
-  },
-  "invoice_output_path": "C:\\Users\\ZenBook\\OneDrive\\Documents\\New project\\scheduler-agents\\outputs\\INVOICE September 2026.docx",
-  "timesheet_approval_required": true,
-  "id": "f2deb553-4597-4c6c-8649-90a0f0b370f2"
+  "timesheet_data": null,
+  "invoice_output_path": null,
+  "timesheet_approval_required": false,
+  "id": "8a5aea97-6755-414c-bd10-d05a6489e12e"
 }

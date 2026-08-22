@@ -56,6 +56,17 @@ class CoverageSlot(TimeSlot):
     pass
 
 
+class CoverageSlotDecision(BaseModel):
+    """One slot's outcome: the slot itself, whether it conflicted with the
+    existing calendar (context only, not the decision), and what the human
+    said. A real coverage email can offer several distinct slots at once,
+    so the flow tracks one of these per slot rather than a single decision."""
+
+    slot: CoverageSlot
+    conflict: bool
+    decision: CoverageDecision
+
+
 class TimesheetData(BaseModel):
     """Extracted from the vendor's monthly Purchase Order PDF -- the email
     body carries no usable data, only this attachment does."""
@@ -81,13 +92,21 @@ class SchedulerFlowState(BaseModel):
     memory_snapshot: dict[str, Any] = Field(default_factory=dict)
     hooks: list[FlowEvent] = Field(default_factory=list)
     used_llm: bool = False
+    # Timezone label read off a roster image (e.g. "UK"), when schedule data
+    # came from vision extraction rather than email text. The roster's own
+    # timezone can differ from the interpreter's default (UserMemory.timezone).
+    roster_timezone_label: str | None = None
 
     # Coverage-request workflow (V2)
-    coverage_slot: CoverageSlot | None = None
-    coverage_conflict: bool = False
-    coverage_decision: CoverageDecision | None = None
+    coverage_slots: list[CoverageSlot] = Field(default_factory=list)
+    coverage_decisions: list[CoverageSlotDecision] = Field(default_factory=list)
     coverage_reply_draft: str | None = None
     coverage_approval_required: bool = False
+    # A real coverage email can also make a vague, non-dated appeal (e.g.
+    # "we need help Mon-Wed 11am-1pm all month") alongside specific-dated
+    # slots. That can't be safely turned into calendar dates, so it's kept
+    # here as a note for the human rather than silently dropped.
+    coverage_unstructured_note: str | None = None
 
     # Availability-request workflow (V3)
     availability_period: str | None = None

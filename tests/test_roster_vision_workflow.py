@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import asyncio
+import json as json_lib
+from pathlib import Path
+
+import httpx
+import pytest
+
+from scheduler_agents.flows.scheduler_flow import SchedulerFlow
+from scheduler_agents.models.state import ScheduleEvent
+from scheduler_agents.tools.roster_vision_tool import (
+    is_vision_configured,
+    parse_roster_image,
+    resolve_timezone,
+)
+
+SAMPLE_DATA = Path(__file__).resolve().parents[1] / "sample_data"
+
+
+def _fake_post_returning(payload: dict, *, wrap_in_fence: bool = False):
+    content = json_lib.dumps(payload)
+    if wrap_in_fence:
+        content = f"```json\n{content}\n```"
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": content}}]},
+        )
+
+    return fake_post
+
+
+def test_resolve_timezone_maps_known_label():
+    assert resolve_timezone("UK", default="Asia/Yerevan") == "Europe/London"
+
+
+def test_resolve_timezone_is_case_insensitive():
+    assert resolve_timezone("uk", default="Asia/Yerevan") == "Europe/London"
+
+
+def test_resolve_timezone_falls_back_to_default_for_unknown_label():
+    assert resolve_timezone("MARS", default="Asia/Yerevan") == "Asia/Yerevan"
+
+
+def test_resolve_timezone_falls_back_when_label_is_none():
+    assert resolve_timezone(None, default="Asia/Yerevan") == "Asia/Yerevan"
+
+
+def test_is_vision_configured_reflects_groq_key(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    assert is_vision_configured() is False
+
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    assert is_vision_configured() is True
+
+
+def test_parse_roster_image_raises_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"not a real png, just needs to exist")
+
+    with pytest.raises(RuntimeError):
+        parse_roster_image(fake_image)
+
+
+def test_parse_roster_image_builds_events_from_model_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"not a real png, just needs to exist")
+
+    payload = {
+        "timezone_label": "UK",
+        "events": [
+            {"date": "2026-05-01", "start_time": "09:00", "end_time": "10:00"},
+            {"date": "2026-05-04", "start_time": "09:00", "end_time": "10:00"},
+        ],
+    }
+    monkeypatch.setattr(
+        "scheduler_agents.tools.roster_vision_tool.httpx.post",
+        _fake_post_returning(payload, wrap_in_fence=True),
+    )
+
+    events, timezone_label = parse_roster_image(fake_image)
+
+    assert timezone_label == "UK"
+    assert len(events) == 2
+    assert all(isinstance(e, ScheduleEvent) for e in events)
+    assert events[0].date.isoformat() == "2026-05-01"
+    assert events[0].source == "roster_image"
+
+
+def test_parse_roster_image_skips_malformed_event_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    payload = {
+        "timezone_label": "UK",
+        "events": [
+            {"date": "2026-05-01", "start_time": "09:00", "end_time": "10:00"},
+            {"date": "not-a-date", "start_time": "09:00", "end_time": "10:00"},
+        ],
+    }
+    monkeypatch.setattr(
+        "scheduler_agents.tools.roster_vision_tool.httpx.post",
+        _fake_post_returning(payload),
+    )
+
+    events, _ = parse_roster_image(fake_image)
+
+    assert len(events) == 1
+    assert events[0].date.isoformat() == "2026-05-01"
+
+
+def test_scheduler_flow_falls_back_to_roster_image_when_body_has_no_dates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    email_path = tmp_path / "roster_email.txt"
+    email_path.write_text(
+        "Subject: May Roster\nFrom: scheduler@example.com\n\nPlease review the attached roster.\n",
+        encoding="utf-8",
+    )
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    def fake_parse_roster_image(path):
+        return (
+            [ScheduleEvent(date="2026-05-01", start_time="09:00", end_time="10:00", source="roster_image")],
+            "UK",
+        )
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.parse_roster_image", fake_parse_roster_image
+    )
+
+    flow = SchedulerFlow(sample_email_path=email_path, roster_image_path=fake_image)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.email_type == "schedule"
+    assert len(state.extracted_events) == 1
+    assert state.roster_timezone_label == "UK"
+    assert any(hook.name == "roster_image_parsed" for hook in state.hooks)
+
+
+def test_scheduler_flow_uses_roster_timezone_for_calendar_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    email_path = tmp_path / "roster_email.txt"
+    email_path.write_text(
+        "Subject: May Roster\nFrom: scheduler@example.com\n\nPlease review the attached roster.\n",
+        encoding="utf-8",
+    )
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    def fake_parse_roster_image(path):
+        return (
+            [
+                ScheduleEvent(
+                    date="2026-05-01",
+                    start_time="09:00",
+                    end_time="10:00",
+                    language="English",
+                    source="roster_image",
+                )
+            ],
+            "UK",
+        )
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.parse_roster_image", fake_parse_roster_image
+    )
+
+    flow = SchedulerFlow(sample_email_path=email_path, roster_image_path=fake_image)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.validation_errors == []
+    assert len(state.calendar_events) == 1
+    assert state.calendar_events[0]["start"]["timeZone"] == "Europe/London"

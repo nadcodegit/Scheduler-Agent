@@ -10,16 +10,23 @@ V1 focuses on the safest useful path:
 sample email -> classify email -> parse schedule -> validate events -> calendar-ready events
 ```
 
-V2 adds the coverage-request workflow: an open-slot email is parsed and
-checked for conflicts against the user's existing calendar, then a human is
-asked directly -- "Can you cover this shift? (y/n)" -- rather than the system
-deciding on its own. The conflict check is shown as context, not used to
-auto-decide. A "yes" drafts an accept reply and adds the slot to
-`calendar_events`; a "no" drafts a decline and leaves the calendar untouched.
-The reply is always a draft -- nothing is ever sent automatically.
+V2 adds the coverage-request workflow. A real coverage email can offer
+*several* distinct slots at once -- specific dates, combined date/time
+listings ("April 9: 10am-12pm and 1-2pm" is two slots), and sometimes a
+vague, non-dated appeal alongside them ("we need help Mon-Wed 11am-1pm this
+month"). Extraction tries an LLM first (handles 12-hour times, multiple
+dates, split listings, and keeps the vague appeal as a separate
+`coverage_unstructured_note` rather than inventing dates for it), falling
+back to a single-slot regex parser if no LLM is configured or it fails.
+Each extracted slot is checked against the user's calendar for conflicts
+(context only) and then the human is asked directly -- "Can you cover this
+shift? (y/n)" -- one slot at a time; the conflict check never decides for
+them. One combined reply is drafted covering every slot; accepted slots are
+added to `calendar_events`. The reply is always a draft -- nothing is ever
+sent automatically.
 
 ```text
-coverage email -> parse slot -> check conflict -> ask human (y/n) -> draft reply + (if yes) update calendar
+coverage email -> extract N slots (+ optional vague note) -> check each conflict -> ask human per slot (y/n) -> one combined draft + calendar updates for accepted slots
 ```
 
 This step is deliberately a plain terminal prompt rather than a notification
@@ -53,6 +60,25 @@ field (name, address, bank details, bill-to) is left untouched.
 purchase-order PDF -> extract job id/period/amount -> fill invoice template -> save .docx (never submitted)
 ```
 
+V5 adds roster-screenshot extraction for V1. Real monthly rosters from this
+vendor arrive as a *screenshot* of a spreadsheet -- a grid of dates x hourly
+slots -- with zero parseable text in the email body, and no text layer for
+regex or the text-only CrewAI agents to read. `parse_schedule` tries, in
+order: LLM (already done in `classify_email` if it found anything) -> regex
+over `email.body` -> a vision-capable LLM call over the roster image. This is
+a plain API call (Groq's `qwen/qwen3.6-27b`), not a CrewAI agent, since it's
+one single-shot "describe this image as JSON" call rather than multi-step
+reasoning. It also reads the roster's own timezone label (e.g. "UK") from the
+column headers, since that can differ from the interpreter's own default
+timezone. As with every other LLM path in this project, the deterministic
+guardrail (`validate_schedule_events`) always re-runs over whatever it
+extracts -- a roster with no language column correctly blocks calendar
+creation and asks for approval rather than guessing.
+
+```text
+roster screenshot -> vision LLM -> events + timezone label -> deterministic guardrail -> calendar (or blocked + approval)
+```
+
 The project is intentionally designed with:
 
 - CrewAI Flow orchestration
@@ -78,6 +104,8 @@ scheduler-agents/
 │   ├── sample_availability_request_email.txt
 │   ├── sample_purchase_order_email.txt
 │   ├── sample_purchase_order.pdf
+│   ├── sample_roster_email.txt
+│   ├── sample_roster.png
 │   ├── sample_busy_calendar.json
 │   └── invoice_template.docx
 ├── src/
@@ -106,6 +134,8 @@ scheduler-agents/
 │           ├── calendar_tool.py
 │           ├── coverage_tool.py
 │           ├── invoice_tool.py
+│           ├── llm_json.py
+│           ├── roster_vision_tool.py
 │           ├── schedule_parser_tool.py
 │           └── timesheet_tool.py
 └── tests/
@@ -113,7 +143,9 @@ scheduler-agents/
     ├── test_scheduler_flow_units.py
     ├── test_coverage_workflow.py
     ├── test_availability_workflow.py
-    └── test_timesheet_workflow.py
+    ├── test_timesheet_workflow.py
+    ├── test_roster_vision_workflow.py
+    └── test_llm_json.py
 ```
 
 ## Two run modes
@@ -134,6 +166,16 @@ Either way, the final schedule-validation guardrail is always the
 deterministic one (`guardrails/schedule_guardrails.py`) — the LLM is trusted
 to extract data, never to decide on its own that data is safe to write to a
 calendar.
+
+Not every LLM call in this project goes through the 3-agent CrewAI crew:
+that crew is specifically for schedule classification/extraction, where
+multi-step agent handoffs (classify -> extract -> validate) are the point.
+Coverage-slot extraction (V2) and roster-image extraction (V5) are each one
+single-shot "read this as JSON" call -- via `litellm.completion()` for
+coverage (so it follows whatever `MODEL` is configured, same as the crew)
+and a direct Groq vision call for the roster image (Groq is currently the
+only configured provider with vision support here). A CrewAI Task/Crew
+would add ceremony without adding anything for either of those.
 
 This project is pinned to Python 3.12 via `.python-version` (crewai's
 dependency chain lags behind the newest CPython releases).
@@ -164,6 +206,14 @@ from `sample_data/sample_purchase_order.pdf` and saves the result to
 
 ```bash
 uv run python -m scheduler_agents.main --sample sample_purchase_order_email.txt
+```
+
+Run the schedule path against a roster screenshot instead of the plain-text
+sample (falls back to vision extraction since the email body has no
+parseable dates; requires `GROQ_API_KEY`):
+
+```bash
+uv run python -m scheduler_agents.main --sample sample_roster_email.txt --roster-image sample_data/sample_roster.png
 ```
 
 For a quick run without installing the package first:
@@ -203,10 +253,11 @@ API being up.
    running interactively -- this needs an async "ask now, resume later"
    design (persisted pending-decision state, polling/webhook for the
    response), not just swapping `input()` for an API call.
-4. Improve coverage-slot extraction to handle loosely-worded, date-less
-   requests (e.g. "stay logged in until 5pm today", 12-hour times) -- these
-   currently fail to parse with either the regex fallback or the LLM path,
-   since neither resolves relative dates like "today".
+4. Coverage-slot extraction still can't resolve *relative* dates with no
+   calendar date at all (e.g. "stay logged in until 5pm today") -- the LLM
+   path added in V2 handles multiple explicit dates, 12-hour times, and
+   split listings, but "today" has no fixed date to anchor to without also
+   knowing which day the email itself was sent.
 5. Add CrewAI eval cases for classification, parsing, and safe tool use.
 6. Split classification from extraction so the extractor/validator agents
    only run once an email is already known to be a schedule email, instead
@@ -216,6 +267,12 @@ API being up.
 8. Extend PDF extraction with an LLM fallback for purchase orders that don't
    match this template's exact layout (job id format, "Total" line wording),
    the same way schedule extraction already has an LLM path alongside regex.
+9. Roster vision extraction only supports Groq (`qwen/qwen3.6-27b`) today and
+   has no LLM-provider fallback if that key/model isn't configured -- unlike
+   every other extraction path in this project. It also has no per-slot
+   language, so every roster-derived event needs human approval; consider
+   letting a configured default language (from `UserMemory`) fill that gap
+   only when the roster is silent on it, rather than always blocking.
 
 ## Course-Style CrewAI Pieces
 

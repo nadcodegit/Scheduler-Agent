@@ -29,11 +29,27 @@ from scheduler_agents.crews.schedule_crew.crew import llm_is_configured, run_llm
 from scheduler_agents.guardrails.schedule_guardrails import validate_schedule_events
 from scheduler_agents.hooks.event_hooks import record_hook
 from scheduler_agents.memory.user_memory import UserMemory
-from scheduler_agents.models.state import CoverageDecision, CoverageSlot, EmailInput, EmailType, ScheduleEvent, SchedulerFlowState
+from scheduler_agents.models.state import (
+    CoverageDecision,
+    CoverageSlot,
+    CoverageSlotDecision,
+    EmailInput,
+    EmailType,
+    ScheduleEvent,
+    SchedulerFlowState,
+)
 from scheduler_agents.tools.availability_tool import draft_availability_reply, extract_requested_period
 from scheduler_agents.tools.calendar_tool import build_calendar_event
-from scheduler_agents.tools.coverage_tool import describe_slot, draft_coverage_reply, has_conflict, load_busy_events, parse_coverage_request
+from scheduler_agents.tools.coverage_tool import (
+    describe_slot,
+    draft_coverage_reply_multi,
+    extract_coverage_slots_via_llm,
+    has_conflict,
+    load_busy_events,
+    parse_coverage_request_regex,
+)
 from scheduler_agents.tools.invoice_tool import fill_invoice_template
+from scheduler_agents.tools.roster_vision_tool import parse_roster_image, resolve_timezone
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
 from scheduler_agents.tools.timesheet_tool import parse_purchase_order_pdf
 
@@ -78,6 +94,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         timesheet_pdf_path: str | Path | None = None,
         invoice_template_path: str | Path | None = None,
         invoice_output_dir: str | Path | None = None,
+        roster_image_path: str | Path | None = None,
     ):
         super().__init__()
         # Real crewai Flow instances auto-create self.state (a read-only property)
@@ -92,6 +109,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         self.timesheet_pdf_path = Path(timesheet_pdf_path) if timesheet_pdf_path else None
         self.invoice_template_path = Path(invoice_template_path) if invoice_template_path else None
         self.invoice_output_dir = Path(invoice_output_dir) if invoice_output_dir else None
+        self.roster_image_path = Path(roster_image_path) if roster_image_path else None
         self.memory = memory or UserMemory()
 
     @start()
@@ -134,22 +152,48 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
     @listen("schedule")
     def parse_schedule(self) -> list[object]:
+        """Try, in order: LLM (already done in classify_email if it found
+        anything) -> regex over email.body -> vision over a roster
+        screenshot. The real roster always arrives as an image with zero
+        parseable text in the email body, so both text-based attempts
+        legitimately come up empty before vision gets a turn.
+        """
+
         record_hook(self.state, "before_parse_schedule")
-        if self.state.used_llm:
+
+        if self.state.extracted_events:
             record_hook(self.state, "parse_schedule_skipped", reason="already_extracted_by_llm")
             return self.state.extracted_events
 
         email = self._require_email()
-        self.state.extracted_events = parse_schedule_text(email.body)
+        events = parse_schedule_text(email.body)
+
+        if not events and self.roster_image_path and self.roster_image_path.exists():
+            try:
+                events, timezone_label = parse_roster_image(self.roster_image_path)
+                self.state.roster_timezone_label = timezone_label
+                record_hook(
+                    self.state,
+                    "roster_image_parsed",
+                    event_count=len(events),
+                    timezone_label=timezone_label,
+                )
+            except Exception as exc:  # network/vision-model failures never crash the flow
+                record_hook(self.state, "roster_image_parse_failed", error=str(exc))
+
+        self.state.extracted_events = events
         record_hook(self.state, "after_parse_schedule", event_count=len(self.state.extracted_events))
         return self.state.extracted_events
 
     @listen(parse_schedule)
     def validate_schedule(self, _events: list[object] | None = None) -> list[str]:
+        """Always re-runs the deterministic guardrail, regardless of whether
+        events came from the LLM, regex, or vision -- this is the one
+        source of truth for "safe to write to the calendar", and it must
+        never be skipped just because some earlier step already ran once.
+        """
+
         record_hook(self.state, "before_validate_schedule")
-        if self.state.used_llm:
-            record_hook(self.state, "validate_schedule_skipped", reason="already_validated_by_llm")
-            return self.state.validation_errors
 
         self.state.validation_errors = validate_schedule_events(self.state.extracted_events)
         self.state.approval_required = bool(self.state.validation_errors)
@@ -169,7 +213,10 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             record_hook(self.state, "calendar_creation_blocked", reason="validation_errors")
             return []
 
-        timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
+        default_timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
+        # A roster image's own timezone (e.g. "UK") can differ from the
+        # interpreter's default -- prefer it when vision extraction set one.
+        timezone = resolve_timezone(self.state.roster_timezone_label, default_timezone)
         await asyncio.sleep(0)
         self.state.calendar_events = [
             build_calendar_event(event, timezone=timezone)
@@ -181,49 +228,71 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
     @listen("coverage_request")
     def handle_coverage_request(self) -> str | None:
-        """V2: extract the open slot, check it against the busy calendar for
-        context, then ask the human directly whether they can cover it --
-        the conflict check informs the human, it doesn't decide for them.
+        """V2: extract every open slot the email offers (a real one can list
+        several dated slots at once, not just one), check each against the
+        busy calendar for context, then ask the human about each slot in
+        turn -- the conflict check informs the human, it doesn't decide for
+        them.
 
-        y -> draft an accept reply and add the slot to calendar_events.
-        n -> draft a decline reply; calendar is left untouched.
+        Tries the LLM first (handles multiple slots, 12-hour times, combined
+        date/time listings); falls back to the single-slot regex parser if
+        no LLM is configured or it fails. One combined reply is drafted
+        covering every slot; accepted slots are added to calendar_events.
         """
 
         record_hook(self.state, "before_handle_coverage_request")
         email = self._require_email()
 
-        slot = parse_coverage_request(email.body)
-        self.state.coverage_slot = slot
+        slots: list[CoverageSlot] = []
+        unstructured_note: str | None = None
+
+        if llm_is_configured():
+            try:
+                slots, unstructured_note = extract_coverage_slots_via_llm(email.body)
+                record_hook(self.state, "coverage_slots_extracted_by_llm", count=len(slots))
+            except Exception as exc:  # LLM/network failures fall back, never crash the flow
+                record_hook(self.state, "coverage_llm_extraction_failed", error=str(exc))
+
+        if not slots:
+            slots = parse_coverage_request_regex(email.body)
+
+        self.state.coverage_slots = slots
+        self.state.coverage_unstructured_note = unstructured_note
         self.state.coverage_approval_required = True
 
-        if slot is None:
+        if not slots:
             record_hook(self.state, "coverage_request_unparseable")
             return None
 
         busy_events = load_busy_events(self.busy_calendar_path) if self.busy_calendar_path else []
-        self.state.coverage_conflict = has_conflict(slot, busy_events)
+        timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
+        decisions: list[CoverageSlotDecision] = []
 
-        can_cover = self.ask_user(slot, self.state.coverage_conflict)
-        self.state.coverage_decision = CoverageDecision.ACCEPT if can_cover else CoverageDecision.DECLINE
-        self.state.coverage_reply_draft = draft_coverage_reply(slot, self.state.coverage_decision)
+        for slot in slots:
+            conflict = has_conflict(slot, busy_events)
+            can_cover = self.ask_user(slot, conflict)
+            decision = CoverageDecision.ACCEPT if can_cover else CoverageDecision.DECLINE
+            decisions.append(CoverageSlotDecision(slot=slot, conflict=conflict, decision=decision))
 
-        if can_cover:
-            schedule_event = ScheduleEvent(
-                date=slot.date,
-                start_time=slot.start_time,
-                end_time=slot.end_time,
-                language=slot.language,
-                title="Interpretation Session (coverage)",
-                source="coverage_request",
-            )
-            timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
-            self.state.calendar_events.append(build_calendar_event(schedule_event, timezone=timezone))
+            if can_cover:
+                schedule_event = ScheduleEvent(
+                    date=slot.date,
+                    start_time=slot.start_time,
+                    end_time=slot.end_time,
+                    language=slot.language,
+                    title="Interpretation Session (coverage)",
+                    source="coverage_request",
+                )
+                self.state.calendar_events.append(build_calendar_event(schedule_event, timezone=timezone))
+
+        self.state.coverage_decisions = decisions
+        self.state.coverage_reply_draft = draft_coverage_reply_multi(decisions, unstructured_note)
 
         record_hook(
             self.state,
             "after_handle_coverage_request",
-            conflict=self.state.coverage_conflict,
-            decision=self.state.coverage_decision.value,
+            slot_count=len(slots),
+            accepted_count=sum(1 for d in decisions if d.decision == CoverageDecision.ACCEPT),
         )
         return self.state.coverage_reply_draft
 
@@ -360,6 +429,14 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         (availability_request). Coverage-shaped phrasing is checked first so
         it wins that overlap; a bare "availability" only falls through to
         availability_request when none of those more specific signals match.
+
+        A bare "hours" is too broad for timesheet: a real monthly roster
+        email said "do not login during these hours" -- referring to
+        time-of-day slots, not a worked-hours total -- and got misclassified
+        as timesheet. "roster"/"rota" are also real-world synonyms for
+        "schedule" this vendor actually uses, checked before the (now
+        narrower) timesheet phrasing so a roster email can't fall through to
+        it via a stray "hours" mention.
         """
 
         text = f"{email.subject}\n{email.body}"
@@ -368,14 +445,15 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             r"\bcover(age|ing)?\b|\bavailable slot\b|\badditional hours?\b|\bextra hours?\b"
             r"|\bstay (logged in|online) (a bit )?longer\b|\bwe have availability\b"
         )
+        timesheet_re = r"\btotal hours\b|\bworked hours\b|\btimesheet\b|\bpurchase order\b"
 
-        if re.search(r"\bschedule\b", text, re.IGNORECASE):
+        if re.search(r"\bschedule\b|\broster\b|\brota\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.SCHEDULE
         elif re.search(coverage_re, text, re.IGNORECASE):
             self.state.email_type = EmailType.COVERAGE_REQUEST
         elif re.search(r"\bavailability\b", text, re.IGNORECASE):
             self.state.email_type = EmailType.AVAILABILITY_REQUEST
-        elif re.search(r"\bhours\b|\btimesheet\b|\bpurchase order\b", text, re.IGNORECASE):
+        elif re.search(timesheet_re, text, re.IGNORECASE):
             self.state.email_type = EmailType.TIMESHEET
         else:
             self.state.email_type = EmailType.OTHER

@@ -29,6 +29,14 @@ def parse_args() -> argparse.Namespace:
         default="sample_schedule_email.txt",
         help="Sample email filename from sample_data, or an absolute path.",
     )
+    parser.add_argument(
+        "--roster-image",
+        default=None,
+        help=(
+            "Path to a roster screenshot to use for schedule extraction when the "
+            "email body has no parseable dates. Defaults to sample_data/sample_roster.png."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -44,12 +52,14 @@ def main() -> None:
     busy_calendar = project_root / "sample_data" / "sample_busy_calendar.json"
     timesheet_pdf = project_root / "sample_data" / "sample_purchase_order.pdf"
     invoice_template = project_root / "sample_data" / "invoice_template.docx"
+    roster_image = Path(args.roster_image) if args.roster_image else project_root / "sample_data" / "sample_roster.png"
     flow = SchedulerFlow(
         sample_email_path=sample_email,
         busy_calendar_path=busy_calendar,
         timesheet_pdf_path=timesheet_pdf,
         invoice_template_path=invoice_template,
         invoice_output_dir=project_root / "outputs",
+        roster_image_path=roster_image,
     )
     state = asyncio.run(flow.run_v1_async())
     output_paths = write_flow_outputs(state, project_root / "outputs")
@@ -60,18 +70,20 @@ def main() -> None:
 
     if state.email_type == "schedule":
         print(f"Extracted events: {len(state.extracted_events)}")
+        if state.roster_timezone_label:
+            print(f"Roster timezone label: {state.roster_timezone_label}")
         print(f"Validation errors: {state.validation_errors}")
         print(f"Calendar payloads: {len(state.calendar_events)}")
         for event in state.calendar_events:
             print(event)
     elif state.email_type == "coverage_request":
-        print(f"Coverage slot: {state.coverage_slot}")
-        print(f"Conflict with existing calendar: {state.coverage_conflict}")
-        print(f"Decision: {state.coverage_decision}")
+        print(f"Coverage slots found: {len(state.coverage_slots)}")
+        for d in state.coverage_decisions:
+            print(f"  {d.slot.date} {d.slot.start_time}-{d.slot.end_time}: {d.decision} (conflict={d.conflict})")
+        if state.coverage_unstructured_note:
+            print(f"Unstructured (non-dated) request noted: {state.coverage_unstructured_note}")
         print(f"Approval required before sending: {state.coverage_approval_required}")
         print(f"Reply draft:\n{state.coverage_reply_draft}")
-        if state.coverage_decision == "accept":
-            print(f"Added to calendar_events: {state.calendar_events[-1]}")
     elif state.email_type == "availability_request":
         print(f"Requested period: {state.availability_period}")
         print(f"Approval required before sending: {state.availability_approval_required}")
