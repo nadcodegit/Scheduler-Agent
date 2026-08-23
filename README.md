@@ -1,6 +1,55 @@
 # Scheduler Agents
 
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
+![Tests](https://img.shields.io/badge/tests-42%20passing-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
+
 CrewAI-based portfolio project for automating interpreter schedule workflows.
+
+## Architecture
+
+A shared spine (receive email -> classify -> route) fans out into four
+independent workflows. Every workflow ends in a draft or a locally-saved
+file, never an automatic send, and every LLM extraction is checked by a
+deterministic guardrail before anything reaches a calendar.
+
+```mermaid
+flowchart TD
+    start["📧 Email / request input"] --> classify["classify_email()<br/>LLM (3 CrewAI agents) → regex fallback"]
+    classify --> router{route_email}
+
+    router -->|schedule| sched1
+    router -->|coverage_request| cov1
+    router -->|availability_request| avail1
+    router -->|timesheet| ts1
+
+    subgraph V1["V1 · schedule"]
+        sched1["parse_schedule()"] --> sched2["validate_schedule_events()<br/>deterministic guardrail"]
+        sched2 --> sched3["create_calendar_events()"]
+    end
+
+    subgraph V2["V2 · coverage_request"]
+        cov1["extract N slots via LLM<br/>(+ regex fallback)"] --> cov2["check conflict per slot<br/>(context only)"]
+        cov2 --> cov3["ask_user() per slot (y/n)"]
+    end
+
+    subgraph V3["V3 · availability_request"]
+        avail1["extract_requested_period()"] --> avail2["ask_availability()"]
+    end
+
+    subgraph V4["V4 · timesheet"]
+        ts1["parse_purchase_order_pdf()<br/>reads the PDF, not email body"] --> ts2["fill_invoice_template()"]
+    end
+
+    img["📷 Roster screenshot<br/>(V5, vision LLM)"] -.->|body has no dates| sched1
+    pdf["📎 Purchase-order PDF"] -.-> ts1
+
+    sched3 --> out1["📅 calendar_events"]
+    cov3 --> out2["✉️ one combined reply draft<br/>+ calendar for accepted slots"]
+    avail2 --> out3["✉️ reply draft"]
+    ts2 --> out4["📄 invoice .docx saved"]
+```
 
 ## Milestones
 
@@ -282,3 +331,7 @@ The project includes the same course-style separation used in the assignment:
 - `crews/schedule_crew/config/tasks.yaml` for task descriptions, expected outputs, context, and async execution.
 - `crews/schedule_crew/crew.py` for `@CrewBase`, `@agent`, `@task`, and `@crew` decorators.
 - `crews/schedule_crew/guardrails/guardrails.py` for task output validation.
+
+## License
+
+[MIT](LICENSE) — see the LICENSE file for the full text.
