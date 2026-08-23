@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -29,10 +29,15 @@ flowchart TD
         sched2 --> sched3["create_calendar_events()"]
     end
 
+    store[("💾 approved_schedule.json<br/>this agent's own approvals only")]
+    sched3 -.->|guardrail passed| store
+
     subgraph V2["V2 · coverage_request"]
-        cov1["extract N slots via LLM<br/>(+ regex fallback)"] --> cov2["check conflict per slot<br/>(context only)"]
+        cov1["extract N slots via LLM<br/>(+ regex fallback)"] --> cov2["check conflict per slot<br/>vs. approved_schedule.json"]
         cov2 --> cov3["ask_user() per slot (y/n)"]
     end
+    store -.-> cov2
+    cov3 -.->|accepted| store
 
     subgraph V3["V3 · availability_request"]
         avail1["extract_requested_period()"] --> avail2["ask_availability()"]
@@ -85,13 +90,21 @@ resolves the phrase to a concrete week in Python (`calendar`-module date
 arithmetic, no LLM involved), and each weekday is then placed within that
 week directly. A period phrase that doesn't parse (or is missing) leaves
 those slots out of the calendar entirely and surfaces a count in
-`coverage_unstructured_note` instead of guessing.
-Each extracted slot is checked against the user's calendar for conflicts
-(context only) and then the human is asked directly -- "Can you cover this
-shift? (y/n)" -- one slot at a time; the conflict check never decides for
-them. One combined reply is drafted covering every slot; accepted slots are
-added to `calendar_events`. The reply is always a draft -- nothing is ever
-sent automatically.
+`coverage_unstructured_note` instead of guessing. Tested against another
+real vendor email mixing weekday-name-plus-day-of-month slots ("today
+Thursday, 5th", "Friday, 6th", "Saturday, 7th" -- correctly resolved) with
+genuinely unbounded recurring ones ("Saturdays: 2-4pm", no period at all --
+correctly left out and flagged, not guessed).
+
+Each extracted slot is checked against the local approved-schedule store for
+conflicts (context only, see "Approved Schedule Store" below) and then the
+human is asked directly -- "Can you cover this shift? (y/n)" -- one slot at a
+time; the conflict check never decides for them. Accepting a slot commits it
+immediately (not just for future emails): if the same request offers two
+overlapping slots, accepting the first makes the second show up as a
+conflict too. One combined reply is drafted covering every slot; accepted
+slots are added to `calendar_events` and the approved-schedule store. The
+reply is always a draft -- nothing is ever sent automatically.
 
 ```text
 coverage email -> extract N slots (+ optional vague note) -> check each conflict -> ask human per slot (y/n) -> one combined draft + calendar updates for accepted slots
@@ -171,12 +184,13 @@ scheduler-agents/
 │   ├── sample_coverage_request_email.txt
 │   ├── sample_coverage_request_relative_dates_email.txt
 │   ├── sample_coverage_request_weekly_availability_email.txt
+│   ├── sample_coverage_request_mixed_dates_email.txt
 │   ├── sample_availability_request_email.txt
 │   ├── sample_purchase_order_email.txt
 │   ├── sample_purchase_order.pdf
 │   ├── sample_roster_email.txt
 │   ├── sample_roster.png
-│   ├── sample_busy_calendar.json
+│   ├── sample_approved_schedule.json
 │   └── invoice_template.docx
 ├── src/
 │   └── scheduler_agents/
@@ -207,6 +221,7 @@ scheduler-agents/
 │           ├── llm_json.py
 │           ├── roster_vision_tool.py
 │           ├── schedule_parser_tool.py
+│           ├── schedule_store.py
 │           └── timesheet_tool.py
 └── tests/
     ├── conftest.py
@@ -215,6 +230,7 @@ scheduler-agents/
     ├── test_availability_workflow.py
     ├── test_timesheet_workflow.py
     ├── test_roster_vision_workflow.py
+    ├── test_schedule_store.py
     └── test_llm_json.py
 ```
 
@@ -249,6 +265,40 @@ would add ceremony without adding anything for either of those.
 
 This project is pinned to Python 3.12 via `.python-version` (crewai's
 dependency chain lags behind the newest CPython releases).
+
+## Approved Schedule Store
+
+V2's conflict check deliberately does *not* talk to a real calendar.
+[`schedule_store.py`](src/scheduler_agents/tools/schedule_store.py) reads
+and writes a local `outputs/approved_schedule.json` -- a flat list of
+`ScheduleEvent`s -- which is this agent's *only* source of truth for "is
+this coverage slot already committed":
+
+- V1 (`create_calendar_events`) appends a month's schedule to it once that
+  schedule clears the deterministic guardrail -- the same "approved" bar V1
+  already applies before building calendar payloads at all.
+- V2 (`handle_coverage_request`) reads it for the conflict check, and
+  appends any slot the human accepts, immediately -- so a second overlapping
+  slot offered in the *same* email is flagged against the one just
+  accepted, not just against future emails.
+- Re-saving an identical date/start/end (e.g. re-running the same month) is
+  deduped rather than appended twice.
+
+A real personal calendar (Google/Outlook) mixes in dentist appointments,
+school pickups, and everything else that has nothing to do with work
+scheduling -- pointing V2's conflict check at one would flag all of that as
+"conflicts" a work-coverage agent has no reason to know about, and would
+require OAuth/credentials/scopes for a signal that's actually less accurate
+than what this agent already knows about itself. The approved schedule this
+agent built and got a human to sign off on **is** the correct source of
+truth for this specific question.
+
+The store is a flat JSON file for now (`json.dumps`/`json.loads`,
+`sample_data/sample_approved_schedule.json` auto-seeds it on first run) --
+plenty for this project's scale. If this ever needs concurrent writers or
+queries across many months, that's a SQLite migration (`approved_schedules`
++ `schedule_slots` tables), not a redesign -- `schedule_store.py` is the one
+place that would change.
 
 ## Run
 
@@ -315,9 +365,11 @@ API being up.
 ## Next Steps
 
 1. Replace the sample email input with Gmail or Outlook ingestion.
-2. Replace the dry-run calendar tool with Google Calendar or Outlook Calendar,
-   and load the busy-calendar check (V2) from the real calendar instead of
-   `sample_busy_calendar.json`.
+2. ~~Connect V2's conflict check to a real calendar~~ -- deliberately not
+   done, and not planned: see "Approved Schedule Store" above for why a
+   local store of this agent's own approvals is a better source of truth
+   than a real Google/Outlook calendar for this specific question, and
+   removes the OAuth/credentials surface entirely.
 3. Move the coverage-request y/n prompt off the terminal onto an actual
    notification channel (e.g. Telegram) so it doesn't require the flow to be
    running interactively -- this needs an async "ask now, resume later"

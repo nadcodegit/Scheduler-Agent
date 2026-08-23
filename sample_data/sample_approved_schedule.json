@@ -5,7 +5,7 @@
     "end_time": "17:00",
     "language": "English",
     "title": "Interpretation Session",
-    "source": "existing_calendar"
+    "source": "approved_schedule"
   },
   {
     "date": "2026-09-12",
@@ -13,6 +13,6 @@
     "end_time": "11:00",
     "language": "Persian",
     "title": "Interpretation Session",
-    "source": "existing_calendar"
+    "source": "approved_schedule"
   }
 ]

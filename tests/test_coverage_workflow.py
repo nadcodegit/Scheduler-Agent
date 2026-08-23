@@ -243,10 +243,48 @@ def test_extract_coverage_slots_via_llm_flags_weekday_slots_with_no_resolvable_p
     assert "sometime soon" in note
 
 
+def test_extract_coverage_slots_via_llm_flags_weekday_slots_with_no_period_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Regression test for a real vendor email with recurring, unbounded
+    slots ("Saturdays: 2-4pm") -- no period phrase at all, unlike the
+    "sometime soon" case above. The note must read cleanly, not leak
+    Python's `None` repr ('period: "None"') into human-facing text."""
+
+    monkeypatch.setenv("MODEL", "gemini/gemini-1.5-flash")
+
+    class _FakeMessage:
+        content = json.dumps(
+            {
+                "slots": [],
+                "weekday_slots": [{"weekday": "Saturday", "start_time": "14:00", "end_time": "16:00"}],
+                "period": None,
+                "unstructured_note": None,
+            }
+        )
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    monkeypatch.setattr(
+        "scheduler_agents.tools.coverage_tool.litellm.completion",
+        lambda **kwargs: _FakeResponse(),
+    )
+
+    slots, note = extract_coverage_slots_via_llm("irrelevant body", anchor_date=date(2026, 8, 23))
+
+    assert slots == []
+    assert "None" not in note
+    assert "no period stated" in note
+
+
 def test_scheduler_flow_declines_when_human_says_no():
     flow = SchedulerFlow(
         sample_email_path=SAMPLE_DATA / "sample_coverage_request_email.txt",
-        busy_calendar_path=SAMPLE_DATA / "sample_busy_calendar.json",
+        approved_schedule_path=SAMPLE_DATA / "sample_approved_schedule.json",
         ask_user=lambda slot, conflict: False,
     )
 
@@ -262,10 +300,17 @@ def test_scheduler_flow_declines_when_human_says_no():
     assert any(hook.name == "after_handle_coverage_request" for hook in state.hooks)
 
 
-def test_scheduler_flow_accepts_and_updates_calendar_when_human_says_yes():
+def test_scheduler_flow_accepts_and_updates_calendar_when_human_says_yes(tmp_path: Path):
+    # Accepting a slot now persists it to approved_schedule_path -- must use
+    # an isolated copy, not the real sample_data fixture, or this test would
+    # mutate a tracked file on every run.
+    approved_schedule_path = tmp_path / "approved_schedule.json"
+    approved_schedule_path.write_text(
+        (SAMPLE_DATA / "sample_approved_schedule.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     flow = SchedulerFlow(
         sample_email_path=SAMPLE_DATA / "sample_coverage_request_email.txt",
-        busy_calendar_path=SAMPLE_DATA / "sample_busy_calendar.json",
+        approved_schedule_path=approved_schedule_path,
         ask_user=lambda slot, conflict: True,
     )
 
@@ -275,6 +320,10 @@ def test_scheduler_flow_accepts_and_updates_calendar_when_human_says_yes():
     assert "I can cover" in state.coverage_reply_draft
     assert len(state.calendar_events) == 1
     assert state.calendar_events[0]["start"]["dateTime"].startswith("2026-09-10T14:00")
+
+    # The accepted slot itself should now be persisted in the store.
+    saved = json.loads(approved_schedule_path.read_text(encoding="utf-8"))
+    assert any(item["date"] == "2026-09-10" and item["start_time"] == "14:00:00" for item in saved)
 
 
 def test_ask_user_receives_the_conflict_flag():
@@ -286,7 +335,7 @@ def test_ask_user_receives_the_conflict_flag():
 
     flow = SchedulerFlow(
         sample_email_path=SAMPLE_DATA / "sample_coverage_request_email.txt",
-        busy_calendar_path=SAMPLE_DATA / "sample_busy_calendar.json",
+        approved_schedule_path=SAMPLE_DATA / "sample_approved_schedule.json",
         ask_user=fake_ask_user,
     )
 
@@ -373,3 +422,53 @@ def test_scheduler_flow_reads_date_header_and_passes_it_as_anchor(
 
     assert state.email.sent_date.isoformat() == "2026-04-08"
     assert captured["anchor_date"].isoformat() == "2026-04-08"
+
+
+def test_accepting_a_slot_flags_a_later_overlapping_slot_in_the_same_email(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A coverage email can offer two overlapping slots at once. Accepting
+    the first must be treated as a real commitment immediately -- not just
+    persisted for *future* emails -- so the second slot's conflict check
+    (still in the same loop) sees it too."""
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.llm_is_configured", lambda: True)
+
+    email_path = tmp_path / "coverage.txt"
+    email_path.write_text(
+        "Subject: Coverage needed\nFrom: scheduler@example.com\n\nOverlapping slots.\n",
+        encoding="utf-8",
+    )
+
+    def fake_extract(email_text, anchor_date=None):
+        return (
+            [
+                CoverageSlot(date="2026-09-20", start_time="09:00", end_time="12:00"),
+                CoverageSlot(date="2026-09-20", start_time="11:00", end_time="13:00"),
+            ],
+            None,
+        )
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.extract_coverage_slots_via_llm", fake_extract
+    )
+
+    conflicts_seen = []
+
+    def fake_ask_user(slot, conflict):
+        conflicts_seen.append(conflict)
+        return True  # accept both
+
+    approved_schedule_path = tmp_path / "approved_schedule.json"
+    flow = SchedulerFlow(
+        sample_email_path=email_path,
+        approved_schedule_path=approved_schedule_path,
+        ask_user=fake_ask_user,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert conflicts_seen == [False, True]  # first slot clean, second overlaps the just-accepted first
+    assert len(state.calendar_events) == 2
+
+    saved = json.loads(approved_schedule_path.read_text(encoding="utf-8"))
+    assert len(saved) == 2

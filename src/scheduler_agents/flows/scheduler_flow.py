@@ -45,12 +45,12 @@ from scheduler_agents.tools.coverage_tool import (
     draft_coverage_reply_multi,
     extract_coverage_slots_via_llm,
     has_conflict,
-    load_busy_events,
     parse_coverage_request_regex,
 )
 from scheduler_agents.tools.invoice_tool import fill_invoice_template
 from scheduler_agents.tools.roster_vision_tool import parse_roster_image, resolve_timezone
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
+from scheduler_agents.tools.schedule_store import load_approved_schedule, save_approved_schedule
 from scheduler_agents.tools.timesheet_tool import parse_purchase_order_pdf
 
 
@@ -88,7 +88,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         self,
         sample_email_path: str | Path | None = None,
         memory: UserMemory | None = None,
-        busy_calendar_path: str | Path | None = None,
+        approved_schedule_path: str | Path | None = None,
         ask_user: Callable[[CoverageSlot, bool], bool] | None = None,
         ask_availability: Callable[[str | None], str] | None = None,
         timesheet_pdf_path: str | Path | None = None,
@@ -103,7 +103,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         if getattr(self, "state", None) is None:
             self.state = SchedulerFlowState()
         self.sample_email_path = Path(sample_email_path) if sample_email_path else None
-        self.busy_calendar_path = Path(busy_calendar_path) if busy_calendar_path else None
+        self.approved_schedule_path = Path(approved_schedule_path) if approved_schedule_path else None
         self.ask_user = ask_user or ask_user_can_cover_via_cli
         self.ask_availability = ask_availability or ask_availability_via_cli
         self.timesheet_pdf_path = Path(timesheet_pdf_path) if timesheet_pdf_path else None
@@ -223,6 +223,14 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             for event in self.state.extracted_events
         ]
 
+        # Passing the deterministic guardrail is this project's approval
+        # gate for V1 (same rule create_calendar_events already applies
+        # above) -- once a month's schedule clears it, it's a real
+        # commitment V2's conflict check needs to know about.
+        if self.state.extracted_events and self.approved_schedule_path:
+            save_approved_schedule(self.state.extracted_events, self.approved_schedule_path)
+            record_hook(self.state, "approved_schedule_saved", event_count=len(self.state.extracted_events))
+
         record_hook(self.state, "after_create_calendar_events", event_count=len(self.state.calendar_events))
         return self.state.calendar_events
 
@@ -230,9 +238,16 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
     def handle_coverage_request(self) -> str | None:
         """V2: extract every open slot the email offers (a real one can list
         several dated slots at once, not just one), check each against the
-        busy calendar for context, then ask the human about each slot in
-        turn -- the conflict check informs the human, it doesn't decide for
-        them.
+        locally-approved work schedule for context, then ask the human about
+        each slot in turn -- the conflict check informs the human, it
+        doesn't decide for them.
+
+        Deliberately not a real calendar integration: a personal
+        Google/Outlook calendar mixes in non-work events that aren't a
+        meaningful conflict signal here. The approved-schedule store (see
+        schedule_store.py) -- built from this agent's own V1 approvals and
+        accepted coverage slots -- is the only source of truth this project
+        needs.
 
         Tries the LLM first (handles multiple slots, 12-hour times, combined
         date/time listings); falls back to the single-slot regex parser if
@@ -266,7 +281,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             record_hook(self.state, "coverage_request_unparseable")
             return None
 
-        busy_events = load_busy_events(self.busy_calendar_path) if self.busy_calendar_path else []
+        busy_events = load_approved_schedule(self.approved_schedule_path) if self.approved_schedule_path else []
         timezone = str(self.state.memory_snapshot.get("timezone", "Asia/Yerevan"))
         decisions: list[CoverageSlotDecision] = []
 
@@ -286,6 +301,13 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                     source="coverage_request",
                 )
                 self.state.calendar_events.append(build_calendar_event(schedule_event, timezone=timezone))
+                # A newly-accepted slot is now a real commitment: keep it in
+                # busy_events for the rest of this loop (so a second
+                # overlapping slot in the *same* email gets flagged too, not
+                # just future emails) and persist it for future runs.
+                busy_events.append(schedule_event)
+                if self.approved_schedule_path:
+                    save_approved_schedule([schedule_event], self.approved_schedule_path)
 
         self.state.coverage_decisions = decisions
         self.state.coverage_reply_draft = draft_coverage_reply_multi(decisions, unstructured_note)

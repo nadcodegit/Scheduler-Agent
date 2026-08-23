@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -49,13 +50,20 @@ def main() -> None:
     if not sample_email.is_absolute():
         sample_email = project_root / "sample_data" / sample_email
 
-    busy_calendar = project_root / "sample_data" / "sample_busy_calendar.json"
+    approved_schedule_path = project_root / "outputs" / "approved_schedule.json"
+    if not approved_schedule_path.exists():
+        # First run: seed from the sample fixture so the coverage-request
+        # demo shows a real conflict warning out of the box. Every run after
+        # that reads/writes this file directly -- this is the one-time
+        # bootstrap, not something later runs repeat.
+        approved_schedule_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(project_root / "sample_data" / "sample_approved_schedule.json", approved_schedule_path)
     timesheet_pdf = project_root / "sample_data" / "sample_purchase_order.pdf"
     invoice_template = project_root / "sample_data" / "invoice_template.docx"
     roster_image = Path(args.roster_image) if args.roster_image else project_root / "sample_data" / "sample_roster.png"
     flow = SchedulerFlow(
         sample_email_path=sample_email,
-        busy_calendar_path=busy_calendar,
+        approved_schedule_path=approved_schedule_path,
         timesheet_pdf_path=timesheet_pdf,
         invoice_template_path=invoice_template,
         invoice_output_dir=project_root / "outputs",

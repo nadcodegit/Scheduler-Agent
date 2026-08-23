@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
@@ -84,4 +85,31 @@ def test_scheduler_flow_handles_unparseable_real_roster_email(tmp_path: Path):
     assert state.extracted_events == []
     assert state.validation_errors == ["No schedule events were extracted."]
     assert state.calendar_events == []
+
+
+def test_scheduler_flow_v1_saves_approved_schedule(tmp_path: Path):
+    approved_schedule_path = tmp_path / "approved_schedule.json"
+    flow = SchedulerFlow(approved_schedule_path=approved_schedule_path)
+
+    state = asyncio.run(flow.run_v1_async())
+
+    assert any(hook.name == "approved_schedule_saved" for hook in state.hooks)
+    saved = json.loads(approved_schedule_path.read_text(encoding="utf-8"))
+    assert len(saved) == 1
+    assert saved[0]["date"] == "2026-09-01"
+
+
+def test_scheduler_flow_v1_does_not_save_when_validation_fails(tmp_path: Path):
+    email_path = tmp_path / "unparseable.txt"
+    email_path.write_text(
+        "Subject: May Roster\nFrom: scheduler@example.com\n\nNo dates here at all.\n",
+        encoding="utf-8",
+    )
+    approved_schedule_path = tmp_path / "approved_schedule.json"
+    flow = SchedulerFlow(sample_email_path=email_path, approved_schedule_path=approved_schedule_path)
+
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.validation_errors  # guardrail blocked it
+    assert not approved_schedule_path.exists()
 

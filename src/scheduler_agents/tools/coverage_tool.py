@@ -5,7 +5,6 @@ import json
 import os
 import re
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import litellm
 
@@ -231,28 +230,11 @@ def extract_coverage_slots_via_llm(
     if unresolved_weekday_slots:
         # A human needs to resolve these manually -- guessing a date here is
         # exactly the failure mode this function exists to avoid.
-        flag = (
-            f"{unresolved_weekday_slots} weekday-labeled slot(s) with no resolvable "
-            f'week (period: "{period}")'
-        )
+        period_description = f'period: "{period}"' if period else "no period stated"
+        flag = f"{unresolved_weekday_slots} weekday-labeled slot(s) with no resolvable week ({period_description})"
         note = f"{note}; {flag}" if note else flag
 
     return slots, note
-
-
-def load_busy_events(path: Path) -> list[ScheduleEvent]:
-    """Load the user's already-committed schedule to check new slots against.
-
-    V1/V2 have no live calendar integration yet, so this reads a JSON fixture
-    representing "what's already on the calendar" instead of calling a real
-    Calendar API.
-    """
-
-    if not path.exists():
-        return []
-
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [ScheduleEvent(**item) for item in data]
 
 
 def has_conflict(slot: CoverageSlot, busy_events: list[ScheduleEvent]) -> bool:

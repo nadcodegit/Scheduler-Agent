@@ -7,4 +7,7 @@ crewai_flow.html
 # Generated invoices embed today's date, so they'd otherwise show a diff
 # every time the V4 demo is re-run on a different day.
 outputs/*.docx
+# Accumulates real approved-schedule state across runs (seeded once from
+# sample_data/sample_approved_schedule.json) -- not a fixed demo artifact.
+outputs/approved_schedule.json
 
