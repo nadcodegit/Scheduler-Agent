@@ -211,6 +211,20 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         record_hook(self.state, "before_validate_schedule")
 
+        # Real Glocco roster/schedule emails never state a language at all --
+        # this vendor relationship is Persian-only, so it's implicit context
+        # on their side, never written down (roster screenshots have no
+        # language column; V5's vision prompt correctly doesn't ask for one).
+        # Backfilling from the user's configured default here -- the one
+        # choke point every extraction path (LLM crew, regex, vision) passes
+        # through -- means the guardrail below validates real data instead
+        # of false-positive-blocking on something the source was never going
+        # to contain.
+        default_language = str(self.state.memory_snapshot.get("default_language", "Persian"))
+        for event in self.state.extracted_events:
+            if not event.language:
+                event.language = default_language
+
         self.state.validation_errors = validate_schedule_events(self.state.extracted_events)
         self.state.approval_required = bool(self.state.validation_errors)
         record_hook(
@@ -288,6 +302,15 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         if not slots:
             slots = parse_coverage_request_regex(email.body)
+
+        # Same rationale as parse_schedule/validate_schedule: coverage
+        # emails from this vendor relationship don't state a language
+        # either, so a missing one defaults to the user's own configured
+        # language rather than showing "Unknown" in the reply draft.
+        default_language = str(self.state.memory_snapshot.get("default_language", "Persian"))
+        for slot in slots:
+            if not slot.language:
+                slot.language = default_language
 
         self.state.coverage_slots = slots
         self.state.coverage_unstructured_note = unstructured_note

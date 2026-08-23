@@ -32,7 +32,23 @@ classify_email:
       (e.g. "do not log in during these hours") is NOT a timesheet --
       only classify as timesheet when hours means a worked-hours total or
       payment calculation.
-    - other: anything that doesn't fit the above.
+    - other: anything that doesn't fit the above. This includes emails that
+      MENTION a date or time range without actually being a schedule --
+      the presence of a date/time alone is not evidence of "schedule".
+      Concretely, classify as other (not schedule):
+        * Attendance/performance feedback about a shift that already
+          happened (e.g. "you were absent for your 8am-9am slot on
+          Monday, why did you log in late?") -- this is feedback about
+          the past, not a new roster to log into.
+        * Compliance/administrative reminders with a deadline (e.g.
+          "please renew your Criminal Background Check / Residence
+          Permit by August 31" or any document/certification expiry
+          notice) -- the date here is a submission deadline, not an
+          interpretation time slot.
+      The test that actually matters: would logging this email's dates as
+      calendar events be useful or nonsensical? A genuine schedule email
+      announces slots the interpreter should show up for; these two
+      examples do not.
 
     Return one label only:
     schedule, coverage_request, availability_request, timesheet, or other.

@@ -92,6 +92,23 @@ def test_fetch_latest_email_returns_none_when_nothing_matches(monkeypatch: pytes
     assert fetch_latest_email() is None
 
 
+def test_fetch_latest_email_defaults_to_glocco_only_query(monkeypatch: pytest.MonkeyPatch):
+    """This project automates one real vendor relationship, not a generic
+    inbox scanner -- the default query (no GMAIL_QUERY env var, no explicit
+    query arg) should already be scoped to Glocco, not a bare "is:unread"
+    that could pick up unrelated mail."""
+
+    monkeypatch.delenv("GMAIL_QUERY", raising=False)
+    messages_resource = _FakeMessagesResource(list_result={"messages": []}, get_result=None)
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(messages_resource)
+    )
+
+    fetch_latest_email()
+
+    assert messages_resource.list_calls[0]["q"] == "from:glocco.com is:unread"
+
+
 def test_fetch_latest_email_parses_plain_text_message(monkeypatch: pytest.MonkeyPatch):
     get_result = {
         "payload": {

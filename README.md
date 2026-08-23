@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-70%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -63,6 +63,21 @@ V1 focuses on the safest useful path:
 ```text
 sample email -> classify email -> parse schedule -> validate events -> calendar-ready events
 ```
+
+`classify_email` had a real false-positive: a vendor email complaining about a
+late login for a *past* shift, and a separate one about a Criminal
+Background Check renewal *deadline*, both mention a date/time and were
+misclassified as `schedule` -- the CBC one especially, since neither
+"schedule" nor "roster" even appears in it, so the offline regex fallback
+correctly said `other`, but the live LLM crew got it wrong and, worse,
+extracted the complaint's referenced shift time as if it were a new
+calendar event. Fixed by adding explicit negative examples to the
+`classify_email` task prompt (`crews/schedule_crew/config/tasks.yaml`):
+a date/time appearing in the body isn't itself evidence of "schedule" --
+attendance feedback about a shift that already happened, and compliance/
+document-deadline reminders, are `other`. Re-verified live against both
+real emails afterward: both now classify as `other` with zero events
+extracted.
 
 V2 adds the coverage-request workflow. A real coverage email can offer
 *several* distinct slots at once -- specific dates, combined date/time
@@ -153,8 +168,12 @@ reasoning. It also reads the roster's own timezone label (e.g. "UK") from the
 column headers, since that can differ from the interpreter's own default
 timezone. As with every other LLM path in this project, the deterministic
 guardrail (`validate_schedule_events`) always re-runs over whatever it
-extracts -- a roster with no language column correctly blocks calendar
-creation and asks for approval rather than guessing.
+extracts. Real rosters have no language column at all -- this vendor
+relationship is Persian-only, so it's implicit context, never written down
+-- so a missing language is backfilled from `UserMemory.default_language`
+(see `validate_schedule` in `scheduler_flow.py`) rather than treated as
+missing data; the guardrail still blocks on anything it can't reconcile
+this way (e.g. an actually unsupported language value).
 
 ```text
 roster screenshot -> vision LLM -> events + timezone label -> deterministic guardrail -> calendar (or blocked + approval)
@@ -191,6 +210,8 @@ scheduler-agents/
 │   ├── sample_roster_email.txt
 │   ├── sample_roster.png
 │   ├── sample_approved_schedule.json
+│   ├── sample_other_attendance_complaint_email.txt
+│   ├── sample_other_compliance_deadline_email.txt
 │   └── invoice_template.docx
 ├── src/
 │   └── scheduler_agents/
@@ -311,12 +332,18 @@ account needed for tests, CI, or a demo run.
 Set `GMAIL_ENABLED=true` plus a Google OAuth `credentials.json` (see
 `.env.example` for the exact setup steps) to switch on
 [`gmail_tool.py`](src/scheduler_agents/tools/gmail_tool.py): each run
-fetches the single most recent message matching `GMAIL_QUERY` (default
-`is:unread`) via `messages().list()`/`.get()`, decodes its MIME body (walks
-multipart messages for the first `text/plain` part), and uses its real
-`Date` header as `EmailInput.sent_date` -- the same field V2's relative-date
-resolution already anchors to, so "today"/"next Monday" in a real inbox
-message resolve correctly without any extra wiring.
+fetches the single most recent message matching `GMAIL_QUERY` via
+`messages().list()`/`.get()`, decodes its MIME body (walks multipart
+messages for the first `text/plain` part), and uses its real `Date` header
+as `EmailInput.sent_date` -- the same field V2's relative-date resolution
+already anchors to, so "today"/"next Monday" in a real inbox message
+resolve correctly without any extra wiring.
+
+`GMAIL_QUERY` defaults to `from:glocco.com is:unread` even with the env var
+unset -- this project automates one real vendor relationship, not a generic
+inbox scanner, so scoping to it is the built-in behavior, not something
+that needs configuring. Override the env var only if you need something
+narrower/different.
 
 The OAuth scope is deliberately the narrowest one that exists for this --
 `gmail.readonly`. This integration calls `list`/`get` only: it never marks a
@@ -429,10 +456,15 @@ API being up.
    the same way schedule extraction already has an LLM path alongside regex.
 9. Roster vision extraction only supports Groq (`qwen/qwen3.6-27b`) today and
    has no LLM-provider fallback if that key/model isn't configured -- unlike
-   every other extraction path in this project. It also has no per-slot
-   language, so every roster-derived event needs human approval; consider
-   letting a configured default language (from `UserMemory`) fill that gap
-   only when the roster is silent on it, rather than always blocking.
+   every other extraction path in this project.
+10. ~~Roster/coverage extraction has no per-slot language~~ -- done:
+    `UserMemory.default_language` (default `"Persian"`, matching this
+    project's real single-vendor, single-language use case) backfills a
+    missing language at `validate_schedule` (V1) and in
+    `handle_coverage_request` (V2), the two choke points every extraction
+    path passes through. Verified live against a real roster email that
+    previously tripped "Missing language" on every one of 5 rows -- now 0
+    validation errors, 5/5 calendar payloads created.
 
 ## Course-Style CrewAI Pieces
 

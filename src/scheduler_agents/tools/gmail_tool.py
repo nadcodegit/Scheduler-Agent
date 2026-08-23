@@ -72,14 +72,16 @@ def _get_service():
 
 def fetch_latest_email(query: str | None = None) -> EmailInput | None:
     """Fetches the single most recent message matching `query` (default:
-    the GMAIL_QUERY env var, or "is:unread") from Gmail. Returns None if
-    nothing matches -- the caller decides how to fall back.
+    the GMAIL_QUERY env var, or a Glocco-only default -- this project
+    automates one real vendor relationship, not a generic inbox scanner)
+    from Gmail. Returns None if nothing matches -- the caller decides how
+    to fall back.
 
     Read-only: uses messages().list()/get() only, never modifies anything
     in the mailbox.
     """
 
-    query = query or os.getenv("GMAIL_QUERY", "is:unread")
+    query = query or os.getenv("GMAIL_QUERY", "from:glocco.com is:unread")
     service = _get_service()
 
     response = service.users().messages().list(userId="me", q=query, maxResults=1).execute()

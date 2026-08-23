@@ -472,3 +472,35 @@ def test_accepting_a_slot_flags_a_later_overlapping_slot_in_the_same_email(
 
     saved = json.loads(approved_schedule_path.read_text(encoding="utf-8"))
     assert len(saved) == 2
+
+
+def test_scheduler_flow_defaults_coverage_slot_language_from_user_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Real Glocco coverage-request emails don't state a language either
+    (same vendor-relationship reason as the roster case) -- a slot with no
+    extracted language should default from UserMemory rather than showing
+    "Unknown" in the reply draft."""
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.llm_is_configured", lambda: True)
+
+    email_path = tmp_path / "coverage.txt"
+    email_path.write_text(
+        "Subject: Coverage needed\nFrom: scheduler@glocco.com\n\nCan you cover April 8, 3-4pm?\n",
+        encoding="utf-8",
+    )
+
+    def fake_extract(email_text, anchor_date=None):
+        # No language kwarg -- matches a real extraction that never got one.
+        return [CoverageSlot(date="2026-04-08", start_time="15:00", end_time="16:00")], None
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.extract_coverage_slots_via_llm", fake_extract
+    )
+
+    flow = SchedulerFlow(sample_email_path=email_path, ask_user=lambda slot, conflict: True)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.coverage_slots[0].language == "Persian"
+    assert "Unknown" not in state.coverage_reply_draft
+    assert "Persian" in state.coverage_reply_draft
