@@ -10,4 +10,8 @@ outputs/*.docx
 # Accumulates real approved-schedule state across runs (seeded once from
 # sample_data/sample_approved_schedule.json) -- not a fixed demo artifact.
 outputs/approved_schedule.json
+# Gmail OAuth client secret and cached user token -- never commit real
+# credentials.
+credentials.json
+token.json
 

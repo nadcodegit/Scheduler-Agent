@@ -47,6 +47,7 @@ from scheduler_agents.tools.coverage_tool import (
     has_conflict,
     parse_coverage_request_regex,
 )
+from scheduler_agents.tools.gmail_tool import fetch_latest_email, is_live_gmail_enabled
 from scheduler_agents.tools.invoice_tool import fill_invoice_template
 from scheduler_agents.tools.roster_vision_tool import parse_roster_image, resolve_timezone
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
@@ -115,12 +116,27 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
     @start()
     def receive_email(self) -> EmailInput:
         record_hook(self.state, "before_receive_email")
+
+        if is_live_gmail_enabled():
+            try:
+                email = fetch_latest_email()
+                if email is not None:
+                    self.state.email = email
+                    self.state.memory_snapshot = self.memory.snapshot()
+                    record_hook(
+                        self.state, "after_receive_email", subject=email.subject, sender=email.sender, source="gmail"
+                    )
+                    return self.state.email
+                record_hook(self.state, "gmail_fetch_found_nothing")
+            except Exception as exc:  # network/auth failures never crash the flow
+                record_hook(self.state, "gmail_fetch_failed", error=str(exc))
+
         raw_email = self._read_sample_email()
         subject, sender, sent_date, body = self._split_email(raw_email)
 
         self.state.email = EmailInput(subject=subject, sender=sender, body=body, sent_date=sent_date)
         self.state.memory_snapshot = self.memory.snapshot()
-        record_hook(self.state, "after_receive_email", subject=subject, sender=sender)
+        record_hook(self.state, "after_receive_email", subject=subject, sender=sender, source="sample")
         return self.state.email
 
     @listen(receive_email)

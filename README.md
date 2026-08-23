@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-70%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -16,7 +16,7 @@ deterministic guardrail before anything reaches a calendar.
 
 ```mermaid
 flowchart TD
-    start["📧 Email / request input"] --> classify["classify_email()<br/>LLM (3 CrewAI agents) → regex fallback"]
+    start["📧 sample_data/*.txt<br/>or live Gmail (opt-in, read-only)"] --> classify["classify_email()<br/>LLM (3 CrewAI agents) → regex fallback"]
     classify --> router{route_email}
 
     router -->|schedule| sched1
@@ -217,6 +217,7 @@ scheduler-agents/
 │           ├── availability_tool.py
 │           ├── calendar_tool.py
 │           ├── coverage_tool.py
+│           ├── gmail_tool.py
 │           ├── invoice_tool.py
 │           ├── llm_json.py
 │           ├── roster_vision_tool.py
@@ -230,6 +231,7 @@ scheduler-agents/
     ├── test_availability_workflow.py
     ├── test_timesheet_workflow.py
     ├── test_roster_vision_workflow.py
+    ├── test_gmail_workflow.py
     ├── test_schedule_store.py
     └── test_llm_json.py
 ```
@@ -300,6 +302,33 @@ queries across many months, that's a SQLite migration (`approved_schedules`
 + `schedule_slots` tables), not a redesign -- `schedule_store.py` is the one
 place that would change.
 
+## Live Gmail Ingestion (optional)
+
+Same zero-setup default as everything else: `GMAIL_ENABLED` unset/false (the
+default) means `receive_email` reads `sample_data/*.txt` -- no Google
+account needed for tests, CI, or a demo run.
+
+Set `GMAIL_ENABLED=true` plus a Google OAuth `credentials.json` (see
+`.env.example` for the exact setup steps) to switch on
+[`gmail_tool.py`](src/scheduler_agents/tools/gmail_tool.py): each run
+fetches the single most recent message matching `GMAIL_QUERY` (default
+`is:unread`) via `messages().list()`/`.get()`, decodes its MIME body (walks
+multipart messages for the first `text/plain` part), and uses its real
+`Date` header as `EmailInput.sent_date` -- the same field V2's relative-date
+resolution already anchors to, so "today"/"next Monday" in a real inbox
+message resolve correctly without any extra wiring.
+
+The OAuth scope is deliberately the narrowest one that exists for this --
+`gmail.readonly`. This integration calls `list`/`get` only: it never marks a
+message read, labels it, archives it, sends anything, or deletes anything.
+A human decides what happens to the source email in their own inbox; this
+agent only ever reads it. The one-time consent runs in your own browser on
+first live run and caches a refresh token to `token.json` (gitignored) so
+it doesn't prompt again. A live fetch failure (expired token, network, or
+simply nothing matching the query) is logged as a hook event and falls back
+to the sample-file path rather than crashing, same as every other external
+call in this project.
+
 ## Run
 
 ```bash
@@ -364,7 +393,10 @@ API being up.
 
 ## Next Steps
 
-1. Replace the sample email input with Gmail or Outlook ingestion.
+1. ~~Replace the sample email input with real ingestion~~ -- done for
+   Gmail (see "Live Gmail Ingestion" above); Outlook would need its own
+   tool module following the same `is_live_*_enabled()` / fallback pattern
+   as `gmail_tool.py` and `schedule_store.py`.
 2. ~~Connect V2's conflict check to a real calendar~~ -- deliberately not
    done, and not planned: see "Approved Schedule Store" above for why a
    local store of this agent's own approvals is a better source of truth

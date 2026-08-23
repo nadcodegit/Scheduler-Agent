@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover
 
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
 from scheduler_agents.output_writer import write_flow_outputs
+from scheduler_agents.tools.gmail_tool import is_live_gmail_enabled
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,11 +70,16 @@ def main() -> None:
         invoice_output_dir=project_root / "outputs",
         roster_image_path=roster_image,
     )
+    email_source = "LIVE Gmail (read-only)" if is_live_gmail_enabled() else f"sample file ({sample_email})"
+    print(f"Email source: {email_source}")
+
     state = asyncio.run(flow.run_v1_async())
     output_paths = write_flow_outputs(state, project_root / "outputs")
 
     print(f"Run id: {state.run_id}")
-    print(f"Sample email: {sample_email}")
+    if state.email is not None:
+        print(f"Email subject: {state.email.subject}")
+        print(f"Email sender: {state.email.sender}")
     print(f"Email type: {state.email_type}")
 
     if state.email_type == "schedule":

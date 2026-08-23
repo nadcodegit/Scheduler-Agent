@@ -21,3 +21,8 @@ _LLM_ENV_VARS = (
 def _force_offline_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in _LLM_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+    # Same rationale, for Gmail ingestion: a developer's real GMAIL_ENABLED=true
+    # would otherwise make the unit suite try to open a real OAuth consent
+    # screen / hit the live Gmail API.
+    monkeypatch.setenv("GMAIL_ENABLED", "false")

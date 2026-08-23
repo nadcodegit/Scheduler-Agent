@@ -4,6 +4,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
 from scheduler_agents.guardrails.schedule_guardrails import validate_schedule_events
 from scheduler_agents.models.state import EmailInput
@@ -112,4 +114,51 @@ def test_scheduler_flow_v1_does_not_save_when_validation_fails(tmp_path: Path):
 
     assert state.validation_errors  # guardrail blocked it
     assert not approved_schedule_path.exists()
+
+
+def test_scheduler_flow_uses_live_gmail_email_when_enabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.fetch_latest_email",
+        lambda: EmailInput(
+            subject="Coverage needed",
+            sender="scheduler@example.com",
+            body="Sep 10, 2026, 14:00-16:00, English",
+        ),
+    )
+
+    # The mocked email classifies as coverage_request (regex fallback), so a
+    # non-interactive ask_user avoids blocking on the CLI prompt's input().
+    flow = SchedulerFlow(ask_user=lambda slot, conflict: False)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.email.subject == "Coverage needed"
+    assert any(hook.name == "after_receive_email" for hook in state.hooks)
+
+
+def test_scheduler_flow_falls_back_to_sample_when_gmail_finds_nothing(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.fetch_latest_email", lambda: None)
+
+    flow = SchedulerFlow()
+    state = asyncio.run(flow.run_v1_async())
+
+    # Default sample email fixture ("Sep 1, 2026...") is used as the fallback.
+    assert state.extracted_events[0].date.isoformat() == "2026-09-01"
+    assert any(hook.name == "gmail_fetch_found_nothing" for hook in state.hooks)
+
+
+def test_scheduler_flow_falls_back_to_sample_when_gmail_fetch_fails(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
+
+    def failing_fetch():
+        raise RuntimeError("token expired")
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.fetch_latest_email", failing_fetch)
+
+    flow = SchedulerFlow()
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.extracted_events[0].date.isoformat() == "2026-09-01"
+    assert any(hook.name == "gmail_fetch_failed" for hook in state.hooks)
 
