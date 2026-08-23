@@ -21,6 +21,12 @@ class EmailInput(BaseModel):
     sender: str
     body: str
     attachments: list[str] = Field(default_factory=list)
+    # The day the email was actually sent, when known (parsed from a "Date:"
+    # header). Relative phrases in the body ("today", "next Monday") must
+    # anchor to this, not to whatever day the flow happens to run -- those
+    # can be days apart. None when the source has no such header; callers
+    # fall back to date.today().
+    sent_date: date | None = None
 
 
 class TimeSlot(BaseModel):

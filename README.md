@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-42%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -64,9 +64,28 @@ V2 adds the coverage-request workflow. A real coverage email can offer
 listings ("April 9: 10am-12pm and 1-2pm" is two slots), and sometimes a
 vague, non-dated appeal alongside them ("we need help Mon-Wed 11am-1pm this
 month"). Extraction tries an LLM first (handles 12-hour times, multiple
-dates, split listings, and keeps the vague appeal as a separate
-`coverage_unstructured_note` rather than inventing dates for it), falling
-back to a single-slot regex parser if no LLM is configured or it fails.
+dates, split listings, relative phrases like "today" or "next Monday", and
+keeps the vague appeal as a separate `coverage_unstructured_note` rather than
+inventing dates for it), falling back to a single-slot regex parser if no LLM
+is configured or it fails. Relative phrases are resolved against
+`EmailInput.sent_date` (parsed from a `Date:` header when the source has one,
+otherwise today) via a deterministic lookup table built in Python and handed
+to the LLM -- the model looks the date up instead of computing it, which
+keeps off-by-one weekday/week errors out of the one place plain code can
+just get right.
+
+Some real vendor emails list bare weekday names instead of dates entirely
+(e.g. "Monday: 11am-3pm" under a "first week of March" heading). Asking the
+LLM to turn that directly into a date is unreliable -- tested against a real
+example, it assigned March 1-7 in list order without checking that March 1
+actually falls on a Sunday, shifting every weekday's hours onto the wrong
+date. So the model is only asked to extract `{weekday, start_time,
+end_time}` pairs plus the period phrase verbatim; `resolve_period_phrase()`
+resolves the phrase to a concrete week in Python (`calendar`-module date
+arithmetic, no LLM involved), and each weekday is then placed within that
+week directly. A period phrase that doesn't parse (or is missing) leaves
+those slots out of the calendar entirely and surfaces a count in
+`coverage_unstructured_note` instead of guessing.
 Each extracted slot is checked against the user's calendar for conflicts
 (context only) and then the human is asked directly -- "Can you cover this
 shift? (y/n)" -- one slot at a time; the conflict check never decides for
@@ -150,6 +169,8 @@ scheduler-agents/
 ├── sample_data/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
+│   ├── sample_coverage_request_relative_dates_email.txt
+│   ├── sample_coverage_request_weekly_availability_email.txt
 │   ├── sample_availability_request_email.txt
 │   ├── sample_purchase_order_email.txt
 │   ├── sample_purchase_order.pdf
@@ -302,11 +323,17 @@ API being up.
    running interactively -- this needs an async "ask now, resume later"
    design (persisted pending-decision state, polling/webhook for the
    response), not just swapping `input()` for an API call.
-4. Coverage-slot extraction still can't resolve *relative* dates with no
-   calendar date at all (e.g. "stay logged in until 5pm today") -- the LLM
-   path added in V2 handles multiple explicit dates, 12-hour times, and
-   split listings, but "today" has no fixed date to anchor to without also
-   knowing which day the email itself was sent.
+4. ~~Coverage-slot extraction still can't resolve *relative* dates~~ --
+   done: relative phrases ("today", "tomorrow", "next Monday") now resolve
+   via a deterministic lookup table anchored to `EmailInput.sent_date` (a
+   parsed `Date:` header, falling back to today). Try it with:
+
+   ```bash
+   uv run python -m scheduler_agents.main --sample sample_coverage_request_relative_dates_email.txt
+   ```
+
+   (requires `MODEL`/an API key -- the regex fallback still only handles the
+   strict explicit-date format, by design.)
 5. Add CrewAI eval cases for classification, parsing, and safe tool use.
 6. Split classification from extraction so the extractor/validator agents
    only run once an email is already known to be a schedule email, instead

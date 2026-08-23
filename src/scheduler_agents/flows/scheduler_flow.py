@@ -116,9 +116,9 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
     def receive_email(self) -> EmailInput:
         record_hook(self.state, "before_receive_email")
         raw_email = self._read_sample_email()
-        subject, sender, body = self._split_email(raw_email)
+        subject, sender, sent_date, body = self._split_email(raw_email)
 
-        self.state.email = EmailInput(subject=subject, sender=sender, body=body)
+        self.state.email = EmailInput(subject=subject, sender=sender, body=body, sent_date=sent_date)
         self.state.memory_snapshot = self.memory.snapshot()
         record_hook(self.state, "after_receive_email", subject=subject, sender=sender)
         return self.state.email
@@ -248,7 +248,9 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         if llm_is_configured():
             try:
-                slots, unstructured_note = extract_coverage_slots_via_llm(email.body)
+                slots, unstructured_note = extract_coverage_slots_via_llm(
+                    email.body, anchor_date=email.sent_date
+                )
                 record_hook(self.state, "coverage_slots_extracted_by_llm", count=len(slots))
             except Exception as exc:  # LLM/network failures fall back, never crash the flow
                 record_hook(self.state, "coverage_llm_extraction_failed", error=str(exc))
@@ -394,9 +396,10 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         )
 
     @staticmethod
-    def _split_email(raw_email: str) -> tuple[str, str, str]:
+    def _split_email(raw_email: str) -> tuple[str, str, date | None, str]:
         subject = ""
         sender = ""
+        sent_date: date | None = None
         body_lines: list[str] = []
 
         for line in raw_email.splitlines():
@@ -404,10 +407,15 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                 subject = line.split(":", 1)[1].strip()
             elif line.lower().startswith("from:"):
                 sender = line.split(":", 1)[1].strip()
+            elif line.lower().startswith("date:"):
+                try:
+                    sent_date = date.fromisoformat(line.split(":", 1)[1].strip())
+                except ValueError:  # unparseable/missing header value; leave None
+                    pass
             else:
                 body_lines.append(line)
 
-        return subject, sender, "\n".join(body_lines).strip()
+        return subject, sender, sent_date, "\n".join(body_lines).strip()
 
     def _require_email(self) -> EmailInput:
         if self.state.email is None:

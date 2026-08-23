@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -8,10 +10,12 @@ import pytest
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
 from scheduler_agents.models.state import CoverageDecision, CoverageSlot, CoverageSlotDecision, ScheduleEvent
 from scheduler_agents.tools.coverage_tool import (
+    _build_relative_date_hints,
     draft_coverage_reply_multi,
     extract_coverage_slots_via_llm,
     has_conflict,
     parse_coverage_request_regex,
+    resolve_period_phrase,
 )
 
 SAMPLE_DATA = Path(__file__).resolve().parents[1] / "sample_data"
@@ -75,6 +79,168 @@ def test_extract_coverage_slots_via_llm_raises_without_model(monkeypatch: pytest
 
     with pytest.raises(RuntimeError):
         extract_coverage_slots_via_llm("some email text")
+
+
+def test_relative_date_hints_anchor_to_the_given_date():
+    # 2026-04-08 is a Wednesday.
+    hints = _build_relative_date_hints(date(2026, 4, 8))
+
+    assert hints["today"] == "2026-04-08"
+    assert hints["tomorrow"] == "2026-04-09"
+
+
+def test_relative_date_hints_resolve_this_and_next_weekday():
+    anchor = date(2026, 4, 8)  # Wednesday
+    hints = _build_relative_date_hints(anchor)
+
+    # "this <weekday>" is the next occurrence on/after the anchor, including
+    # the anchor's own weekday; "next <weekday>" is a week after that.
+    assert hints["this wednesday"] == "2026-04-08"
+    assert hints["next wednesday"] == "2026-04-15"
+    assert hints["this friday"] == "2026-04-10"
+    assert hints["next friday"] == "2026-04-17"
+
+
+def test_extract_coverage_slots_via_llm_anchors_prompt_to_email_sent_date(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The prompt sent to the LLM must resolve relative phrases against the
+    email's own send date, not whatever day the flow happens to run --
+    otherwise "today" in a three-day-old email would resolve wrong."""
+
+    monkeypatch.setenv("MODEL", "gemini/gemini-1.5-flash")
+    captured: dict = {}
+
+    class _FakeMessage:
+        content = '{"slots": [{"date": "2026-04-08", "start_time": "17:00", "end_time": "18:00"}], "unstructured_note": null}'
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    def fake_completion(*, model, messages, temperature):
+        captured["prompt"] = messages[0]["content"]
+        return _FakeResponse()
+
+    monkeypatch.setattr("scheduler_agents.tools.coverage_tool.litellm.completion", fake_completion)
+
+    slots, _ = extract_coverage_slots_via_llm(
+        "Can you stay logged in until 5pm today?", anchor_date=date(2026, 4, 8)
+    )
+
+    assert "sent on 2026-04-08 (Wednesday)" in captured["prompt"]
+    assert '"today": "2026-04-08"' in captured["prompt"]
+    assert len(slots) == 1
+    assert slots[0].date.isoformat() == "2026-04-08"
+
+
+def test_resolve_period_phrase_this_and_next_week():
+    anchor = date(2026, 4, 8)  # Wednesday
+
+    assert resolve_period_phrase("this week", anchor).isoformat() == "2026-04-06"  # Monday of that week
+    assert resolve_period_phrase("next week", anchor).isoformat() == "2026-04-13"
+
+
+def test_resolve_period_phrase_month_week_prefers_upcoming_occurrence():
+    # A real vendor email ("first week of March") received on Aug 23 must
+    # resolve to the *next* March, not one that already passed 5 months ago.
+    anchor = date(2026, 8, 23)
+
+    start = resolve_period_phrase("first week of March", anchor)
+
+    assert start.isoformat() == "2027-03-01"
+    assert start.strftime("%A") == "Monday"
+
+
+def test_resolve_period_phrase_month_week_honors_explicit_year():
+    assert resolve_period_phrase("last week of February 2026", date(2026, 8, 23)).isoformat() == "2026-02-22"
+
+
+def test_resolve_period_phrase_returns_none_for_unrecognized_text():
+    assert resolve_period_phrase("sometime soon", date(2026, 8, 23)) is None
+
+
+def test_extract_coverage_slots_via_llm_resolves_weekday_slots_against_period(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Regression test for a real vendor email that lists bare weekday names
+    ("Monday: 11am-3pm") under a "first week of March" heading. The LLM
+    itself mis-aligned these by one day (Monday's hours landed on the actual
+    Sunday) when asked to compute the date directly -- this checks that the
+    weekday-name -> date mapping happens in deterministic Python instead."""
+
+    monkeypatch.setenv("MODEL", "gemini/gemini-1.5-flash")
+
+    class _FakeMessage:
+        content = json.dumps(
+            {
+                "slots": [],
+                "weekday_slots": [
+                    {"weekday": "Monday", "start_time": "11:00", "end_time": "15:00"},
+                    {"weekday": "Sunday", "start_time": "13:00", "end_time": "15:00"},
+                ],
+                "period": "first week of March",
+                "unstructured_note": None,
+            }
+        )
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    monkeypatch.setattr(
+        "scheduler_agents.tools.coverage_tool.litellm.completion",
+        lambda **kwargs: _FakeResponse(),
+    )
+
+    slots, note = extract_coverage_slots_via_llm(
+        "irrelevant body", anchor_date=date(2026, 8, 23)
+    )
+
+    by_date = {s.date.isoformat(): s for s in slots}
+    assert by_date["2027-03-01"].date.strftime("%A") == "Monday"
+    assert by_date["2027-03-07"].date.strftime("%A") == "Sunday"
+    assert note is None
+
+
+def test_extract_coverage_slots_via_llm_flags_weekday_slots_with_no_resolvable_period(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """When the period phrase can't be resolved, weekday slots must not turn
+    into guessed dates -- they get surfaced to the human instead."""
+
+    monkeypatch.setenv("MODEL", "gemini/gemini-1.5-flash")
+
+    class _FakeMessage:
+        content = json.dumps(
+            {
+                "slots": [],
+                "weekday_slots": [{"weekday": "Monday", "start_time": "11:00", "end_time": "15:00"}],
+                "period": "sometime soon",
+                "unstructured_note": None,
+            }
+        )
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    monkeypatch.setattr(
+        "scheduler_agents.tools.coverage_tool.litellm.completion",
+        lambda **kwargs: _FakeResponse(),
+    )
+
+    slots, note = extract_coverage_slots_via_llm("irrelevant body", anchor_date=date(2026, 8, 23))
+
+    assert slots == []
+    assert "1 weekday-labeled slot" in note
+    assert "sometime soon" in note
 
 
 def test_scheduler_flow_declines_when_human_says_no():
@@ -145,7 +311,7 @@ def test_scheduler_flow_handles_multiple_slots_via_mocked_llm(
         encoding="utf-8",
     )
 
-    def fake_extract(email_text):
+    def fake_extract(email_text, anchor_date=None):
         return (
             [
                 CoverageSlot(date="2026-04-08", start_time="15:00", end_time="16:00"),
@@ -173,3 +339,37 @@ def test_scheduler_flow_handles_multiple_slots_via_mocked_llm(
     assert state.coverage_unstructured_note == "Mon-Wed 11am-1pm all month"
     assert len(state.calendar_events) == 1  # only the April 8 slot was accepted
     assert "Mon-Wed 11am-1pm all month" in state.coverage_reply_draft
+
+
+def test_scheduler_flow_reads_date_header_and_passes_it_as_anchor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A 'Date:' header in the source email should become EmailInput.sent_date
+    and flow through to extract_coverage_slots_via_llm as anchor_date --
+    relative phrases like "today" must resolve against when the email was
+    sent, not whatever day the flow happens to run."""
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.llm_is_configured", lambda: True)
+
+    email_path = tmp_path / "coverage.txt"
+    email_path.write_text(
+        "Subject: Coverage needed\nFrom: scheduler@example.com\nDate: 2026-04-08\n\n"
+        "Can you stay logged in until 5pm today?\n",
+        encoding="utf-8",
+    )
+
+    captured: dict = {}
+
+    def fake_extract(email_text, anchor_date=None):
+        captured["anchor_date"] = anchor_date
+        return [CoverageSlot(date="2026-04-08", start_time="14:00", end_time="17:00")], None
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.extract_coverage_slots_via_llm", fake_extract
+    )
+
+    flow = SchedulerFlow(sample_email_path=email_path, ask_user=lambda slot, conflict: False)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.email.sent_date.isoformat() == "2026-04-08"
+    assert captured["anchor_date"].isoformat() == "2026-04-08"
