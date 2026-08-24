@@ -70,18 +70,30 @@ def _get_service():
     return build("gmail", "v1", credentials=_get_credentials())
 
 
-def fetch_latest_email(query: str | None = None) -> EmailInput | None:
+def fetch_latest_email(query: str | None = None, save_pdf_attachment_to: Path | None = None) -> EmailInput | None:
     """Fetches the single most recent message matching `query` (default:
-    the GMAIL_QUERY env var, or a Glocco-only default -- this project
-    automates one real vendor relationship, not a generic inbox scanner)
-    from Gmail. Returns None if nothing matches -- the caller decides how
-    to fall back.
+    the GMAIL_QUERY env var, or a Glocco-only default covering both of
+    their real sending domains -- this project automates one real vendor
+    relationship, not a generic inbox scanner) from Gmail. Returns None if
+    nothing matches -- the caller decides how to fall back.
 
-    Read-only: uses messages().list()/get() only, never modifies anything
-    in the mailbox.
+    Read-only: uses messages().list()/get()/attachments().get() only, never
+    modifies anything in the mailbox.
+
+    When `save_pdf_attachment_to` is given and the message has a PDF
+    attachment (V4's real Purchase Order notifications carry the actual
+    job id/period/amount data as a PDF, not in the body), the first one
+    found is downloaded and written there; `EmailInput.attachments` is
+    populated with its filename as the caller's signal that a save
+    happened -- an empty list means no PDF was found, not "check the file",
+    since a stale file from a previous run may still exist on disk.
     """
 
-    query = query or os.getenv("GMAIL_QUERY", "from:glocco.com is:unread")
+    # Glocco uses two real sending domains: glocco.com for scheduling/
+    # coverage mail, glocco.sk for Purchase Order/invoicing notifications
+    # (their XTRF platform) -- confirmed live, a from:glocco.com-only query
+    # silently missed a real unread Purchase Order email from glocco.sk.
+    query = query or os.getenv("GMAIL_QUERY", "from:(glocco.com OR glocco.sk) is:unread")
     service = _get_service()
 
     response = service.users().messages().list(userId="me", q=query, maxResults=1).execute()
@@ -89,8 +101,10 @@ def fetch_latest_email(query: str | None = None) -> EmailInput | None:
     if not messages:
         return None
 
-    message = service.users().messages().get(userId="me", id=messages[0]["id"], format="full").execute()
-    headers = {h["name"].lower(): h["value"] for h in message.get("payload", {}).get("headers", [])}
+    message_id = messages[0]["id"]
+    message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+    payload = message.get("payload", {})
+    headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
 
     sent_date = None
     if "date" in headers:
@@ -99,10 +113,20 @@ def fetch_latest_email(query: str | None = None) -> EmailInput | None:
         except (TypeError, ValueError):
             pass  # unparseable Date header -- callers fall back to today
 
+    attachments: list[str] = []
+    if save_pdf_attachment_to is not None:
+        pdf_part = _find_first_pdf_part(payload)
+        if pdf_part is not None:
+            pdf_bytes = _fetch_attachment_bytes(service, message_id, pdf_part)
+            save_pdf_attachment_to.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf_attachment_to.write_bytes(pdf_bytes)
+            attachments = [pdf_part.get("filename") or save_pdf_attachment_to.name]
+
     return EmailInput(
         subject=headers.get("subject", ""),
         sender=headers.get("from", ""),
-        body=_extract_plain_text_body(message.get("payload", {})),
+        body=_extract_plain_text_body(payload),
+        attachments=attachments,
         sent_date=sent_date,
     )
 
@@ -131,3 +155,39 @@ def _extract_plain_text_body(payload: dict[str, Any]) -> str:
 
 def _decode_body(data: str) -> str:
     return base64.urlsafe_b64decode(data.encode("utf-8")).decode("utf-8", errors="replace")
+
+
+def _find_first_pdf_part(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Walks a Gmail message payload's MIME tree for the first part that
+    looks like a PDF attachment (a filename ending in .pdf, or an explicit
+    application/pdf mimeType) and returns that part's raw dict, or None.
+    """
+
+    filename = payload.get("filename") or ""
+    mime_type = payload.get("mimeType") or ""
+    if filename.lower().endswith(".pdf") or mime_type == "application/pdf":
+        return payload
+
+    for part in payload.get("parts", []) or []:
+        found = _find_first_pdf_part(part)
+        if found is not None:
+            return found
+
+    return None
+
+
+def _fetch_attachment_bytes(service, message_id: str, part: dict[str, Any]) -> bytes:
+    """Decodes an attachment part's content. Small attachments carry their
+    data inline in the part itself; larger ones (real PDFs, almost always)
+    only carry an attachmentId requiring a separate API call to fetch.
+    """
+
+    body = part.get("body", {})
+    data = body.get("data")
+    if not data:
+        attachment_id = body["attachmentId"]
+        attachment = (
+            service.users().messages().attachments().get(userId="me", messageId=message_id, id=attachment_id).execute()
+        )
+        data = attachment["data"]
+    return base64.urlsafe_b64decode(data.encode("utf-8"))

@@ -124,4 +124,11 @@ class SchedulerFlowState(BaseModel):
     timesheet_data: TimesheetData | None = None
     invoice_output_path: str | None = None
     timesheet_approval_required: bool = False
+    # Set by receive_email() when live Gmail found a PDF attachment on the
+    # fetched message and saved it locally -- handle_timesheet() prefers
+    # this over the static timesheet_pdf_path fallback when set. None means
+    # no live attachment was found this run (not "use the local sample" --
+    # that distinction matters so a stale downloaded file from a previous
+    # run is never silently reused).
+    live_pdf_attachment_path: str | None = None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import pytest
@@ -45,12 +46,23 @@ class _FakeExecutable:
         return self._result
 
 
+class _FakeAttachmentsResource:
+    def __init__(self, get_result):
+        self._get_result = get_result
+        self.get_calls: list[dict] = []
+
+    def get(self, **kwargs):
+        self.get_calls.append(kwargs)
+        return _FakeExecutable(self._get_result)
+
+
 class _FakeMessagesResource:
-    def __init__(self, list_result, get_result):
+    def __init__(self, list_result, get_result, attachment_get_result=None):
         self._list_result = list_result
         self._get_result = get_result
         self.list_calls: list[dict] = []
         self.get_calls: list[dict] = []
+        self.attachments_resource = _FakeAttachmentsResource(attachment_get_result)
 
     def list(self, **kwargs):
         self.list_calls.append(kwargs)
@@ -59,6 +71,9 @@ class _FakeMessagesResource:
     def get(self, **kwargs):
         self.get_calls.append(kwargs)
         return _FakeExecutable(self._get_result)
+
+    def attachments(self):
+        return self.attachments_resource
 
 
 class _FakeUsersResource:
@@ -96,7 +111,10 @@ def test_fetch_latest_email_defaults_to_glocco_only_query(monkeypatch: pytest.Mo
     """This project automates one real vendor relationship, not a generic
     inbox scanner -- the default query (no GMAIL_QUERY env var, no explicit
     query arg) should already be scoped to Glocco, not a bare "is:unread"
-    that could pick up unrelated mail."""
+    that could pick up unrelated mail. Covers both of their real sending
+    domains: glocco.com (scheduling/coverage) and glocco.sk (Purchase Order/
+    invoicing, confirmed live -- a glocco.com-only query silently missed a
+    real unread Purchase Order email from glocco.sk)."""
 
     monkeypatch.delenv("GMAIL_QUERY", raising=False)
     messages_resource = _FakeMessagesResource(list_result={"messages": []}, get_result=None)
@@ -106,7 +124,7 @@ def test_fetch_latest_email_defaults_to_glocco_only_query(monkeypatch: pytest.Mo
 
     fetch_latest_email()
 
-    assert messages_resource.list_calls[0]["q"] == "from:glocco.com is:unread"
+    assert messages_resource.list_calls[0]["q"] == "from:(glocco.com OR glocco.sk) is:unread"
 
 
 def test_fetch_latest_email_parses_plain_text_message(monkeypatch: pytest.MonkeyPatch):
@@ -170,3 +188,107 @@ def test_fetch_latest_email_walks_multipart_for_plain_text(monkeypatch: pytest.M
 
     assert email.body == "plain body text"
     assert email.sent_date is None  # no Date header in this fixture
+
+
+def test_fetch_latest_email_saves_small_inline_pdf_attachment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Small attachments carry their data inline in the part itself, no
+    # separate attachments().get() call needed.
+    pdf_bytes = b"%PDF-1.4 fake pdf content"
+    get_result = {
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [
+                {"name": "Subject", "value": "Purchase Order"},
+                {"name": "From", "value": "scheduler@glocco.com"},
+            ],
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64("Please find attached the Purchase Order.")}},
+                {
+                    "filename": "Purchase_Order_1944.pdf",
+                    "mimeType": "application/pdf",
+                    "body": {"data": base64.urlsafe_b64encode(pdf_bytes).decode("ascii")},
+                },
+            ],
+        }
+    }
+    messages_resource = _FakeMessagesResource(
+        list_result={"messages": [{"id": "msg-po"}]}, get_result=get_result
+    )
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(messages_resource)
+    )
+
+    save_path = tmp_path / "downloaded.pdf"
+    email = fetch_latest_email(save_pdf_attachment_to=save_path)
+
+    assert email.attachments == ["Purchase_Order_1944.pdf"]
+    assert save_path.read_bytes() == pdf_bytes
+    assert messages_resource.attachments_resource.get_calls == []  # inline data, no extra call needed
+
+
+def test_fetch_latest_email_fetches_large_pdf_attachment_via_attachment_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Real (larger) PDFs only carry an attachmentId in the message payload;
+    # the actual bytes require a separate attachments().get() call.
+    pdf_bytes = b"%PDF-1.4 a bigger fake pdf"
+    get_result = {
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [
+                {"name": "Subject", "value": "Purchase Order"},
+                {"name": "From", "value": "scheduler@glocco.com"},
+            ],
+            "parts": [
+                {
+                    "filename": "Purchase_Order_1944.pdf",
+                    "mimeType": "application/pdf",
+                    "body": {"attachmentId": "att-123", "size": 999999},
+                },
+            ],
+        }
+    }
+    messages_resource = _FakeMessagesResource(
+        list_result={"messages": [{"id": "msg-po"}]},
+        get_result=get_result,
+        attachment_get_result={"data": base64.urlsafe_b64encode(pdf_bytes).decode("ascii")},
+    )
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(messages_resource)
+    )
+
+    save_path = tmp_path / "downloaded.pdf"
+    email = fetch_latest_email(save_pdf_attachment_to=save_path)
+
+    assert email.attachments == ["Purchase_Order_1944.pdf"]
+    assert save_path.read_bytes() == pdf_bytes
+    assert messages_resource.attachments_resource.get_calls == [
+        {"userId": "me", "messageId": "msg-po", "id": "att-123"}
+    ]
+
+
+def test_fetch_latest_email_does_not_save_when_no_pdf_attachment_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """No PDF found -- attachments must be empty (the caller's signal that
+    nothing was saved this run), and nothing should be written to disk."""
+
+    get_result = {
+        "payload": {
+            "mimeType": "text/plain",
+            "headers": [{"name": "Subject", "value": "Free slot"}, {"name": "From", "value": "scheduler@glocco.com"}],
+            "body": {"data": _b64("no attachment here")},
+        }
+    }
+    messages_resource = _FakeMessagesResource(
+        list_result={"messages": [{"id": "msg-1"}]}, get_result=get_result
+    )
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(messages_resource)
+    )
+
+    save_path = tmp_path / "downloaded.pdf"
+    email = fetch_latest_email(save_pdf_attachment_to=save_path)
+
+    assert email.attachments == []
+    assert not save_path.exists()

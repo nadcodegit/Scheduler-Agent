@@ -103,6 +103,8 @@ def main() -> None:
         print(f"Approval required before sending: {state.availability_approval_required}")
         print(f"Reply draft:\n{state.availability_reply_draft}")
     elif state.email_type == "timesheet":
+        pdf_source = "LIVE Gmail attachment" if state.live_pdf_attachment_path else f"local file ({timesheet_pdf})"
+        print(f"Purchase Order PDF source: {pdf_source}")
         print(f"Timesheet data: {state.timesheet_data}")
         print(f"Approval required before submitting: {state.timesheet_approval_required}")
         print(f"Filled invoice saved to: {state.invoice_output_path}")

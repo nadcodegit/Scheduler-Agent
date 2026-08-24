@@ -133,3 +133,22 @@ def test_scheduler_flow_fills_invoice_from_purchase_order_pdf(tmp_path: Path):
 
     doc = docx.Document(state.invoice_output_path)
     assert doc.tables[2].rows[2].cells[0].paragraphs[0].text == "2026/1234/#1/1"
+
+
+def test_scheduler_flow_prefers_live_pdf_attachment_over_static_path(tmp_path: Path):
+    """When receive_email() found and downloaded a real PDF attachment this
+    run (live_pdf_attachment_path set), handle_timesheet() must use that --
+    not the static local sample -- even if the static path is missing."""
+
+    flow = SchedulerFlow(
+        sample_email_path=SAMPLE_DATA / "sample_purchase_order_email.txt",
+        timesheet_pdf_path=tmp_path / "does_not_exist.pdf",
+        invoice_template_path=SAMPLE_DATA / "invoice_template.docx",
+        invoice_output_dir=tmp_path,
+    )
+    flow.state.live_pdf_attachment_path = str(SAMPLE_DATA / "sample_purchase_order.pdf")
+
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.timesheet_data is not None
+    assert state.timesheet_data.job_id == "2026/1234/#1/1"

@@ -120,7 +120,7 @@ def test_scheduler_flow_uses_live_gmail_email_when_enabled(monkeypatch: pytest.M
     monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
     monkeypatch.setattr(
         "scheduler_agents.flows.scheduler_flow.fetch_latest_email",
-        lambda: EmailInput(
+        lambda **kwargs: EmailInput(
             subject="Coverage needed",
             sender="scheduler@example.com",
             body="Sep 10, 2026, 14:00-16:00, English",
@@ -138,7 +138,7 @@ def test_scheduler_flow_uses_live_gmail_email_when_enabled(monkeypatch: pytest.M
 
 def test_scheduler_flow_falls_back_to_sample_when_gmail_finds_nothing(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
-    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.fetch_latest_email", lambda: None)
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.fetch_latest_email", lambda **kwargs: None)
 
     flow = SchedulerFlow()
     state = asyncio.run(flow.run_v1_async())
@@ -151,7 +151,7 @@ def test_scheduler_flow_falls_back_to_sample_when_gmail_finds_nothing(monkeypatc
 def test_scheduler_flow_falls_back_to_sample_when_gmail_fetch_fails(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
 
-    def failing_fetch():
+    def failing_fetch(**kwargs):
         raise RuntimeError("token expired")
 
     monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.fetch_latest_email", failing_fetch)
@@ -161,4 +161,47 @@ def test_scheduler_flow_falls_back_to_sample_when_gmail_fetch_fails(monkeypatch:
 
     assert state.extracted_events[0].date.isoformat() == "2026-09-01"
     assert any(hook.name == "gmail_fetch_failed" for hook in state.hooks)
+
+
+def test_scheduler_flow_sets_live_pdf_attachment_path_when_gmail_finds_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """receive_email() must record that a live PDF attachment was actually
+    downloaded this run, so handle_timesheet() (V4) knows to prefer it over
+    the static local sample -- signaled via EmailInput.attachments being
+    non-empty, not by checking whether a file exists on disk (a stale
+    download from a previous run could still be sitting there)."""
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.fetch_latest_email",
+        lambda **kwargs: EmailInput(
+            subject="Purchase Order",
+            sender="scheduler@glocco.com",
+            body="Please find attached the Purchase Order.",
+            attachments=["Purchase_Order_1944.pdf"],
+        ),
+    )
+
+    flow = SchedulerFlow(invoice_output_dir=tmp_path)
+    state = asyncio.run(flow.run_v1_async())
+
+    expected_path = str(tmp_path / "downloaded_purchase_order.pdf")
+    assert state.live_pdf_attachment_path == expected_path
+    assert any(hook.name == "gmail_pdf_attachment_saved" for hook in state.hooks)
+
+
+def test_scheduler_flow_leaves_live_pdf_attachment_path_unset_when_none_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.is_live_gmail_enabled", lambda: True)
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.fetch_latest_email",
+        lambda **kwargs: EmailInput(subject="Free slot", sender="scheduler@glocco.com", body="no attachment"),
+    )
+
+    flow = SchedulerFlow(invoice_output_dir=tmp_path)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.live_pdf_attachment_path is None
 

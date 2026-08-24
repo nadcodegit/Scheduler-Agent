@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -174,6 +174,16 @@ fixed Word invoice template (invoice number, date, job id, amount/total) and
 saves a new `.docx` locally -- it never uploads or submits anything to the
 vendor platform; the human reviews and submits it themselves. Every static
 field (name, address, bank details, bill-to) is left untouched.
+
+When live Gmail is enabled, `receive_email()` downloads the actual PDF
+attachment off the fetched message (`gmail_tool.py`'s `messages().list()`/
+`get()`/`attachments().get()` -- the same `gmail.readonly` scope already
+covers attachment bytes, no extra permission needed) to
+`outputs/downloaded_purchase_order.pdf`, and `handle_timesheet()` prefers
+that over the static `sample_data/sample_purchase_order.pdf` fallback. A
+run that finds no PDF leaves `live_pdf_attachment_path` unset rather than
+checking whether a file happens to exist on disk, so a stale download from
+a previous run is never silently reused.
 
 ```text
 purchase-order PDF -> extract job id/period/amount -> fill invoice template -> save .docx (never submitted)
@@ -365,11 +375,15 @@ as `EmailInput.sent_date` -- the same field V2's relative-date resolution
 already anchors to, so "today"/"next Monday" in a real inbox message
 resolve correctly without any extra wiring.
 
-`GMAIL_QUERY` defaults to `from:glocco.com is:unread` even with the env var
-unset -- this project automates one real vendor relationship, not a generic
-inbox scanner, so scoping to it is the built-in behavior, not something
-that needs configuring. Override the env var only if you need something
-narrower/different.
+`GMAIL_QUERY` defaults to `from:(glocco.com OR glocco.sk) is:unread` even
+with the env var unset -- this project automates one real vendor
+relationship, not a generic inbox scanner, so scoping to it is the built-in
+behavior, not something that needs configuring. Both real sending domains
+are covered: `glocco.com` for scheduling/coverage mail, `glocco.sk` for
+Purchase Order/invoicing notifications (confirmed live -- a
+`glocco.com`-only query silently missed a real unread Purchase Order email
+from `glocco.sk` until this was caught and fixed). Override the env var
+only if you need something narrower/different.
 
 The OAuth scope is deliberately the narrowest one that exists for this --
 `gmail.readonly`. This integration calls `list`/`get` only: it never marks a
@@ -475,8 +489,14 @@ API being up.
 6. Split classification from extraction so the extractor/validator agents
    only run once an email is already known to be a schedule email, instead
    of always running the full three-task crew.
-7. Read the vendor's real PDF attachment straight from Gmail/Outlook instead
-   of a local `timesheet_pdf_path`, once real email ingestion (item 1) lands.
+7. ~~Read the vendor's real PDF attachment straight from Gmail~~ -- done:
+   `gmail_tool.py` downloads the PDF off the classified message
+   (`gmail.readonly` already covers attachment bytes) and `handle_timesheet`
+   prefers it over the static `timesheet_pdf_path` fallback. Verified live
+   end-to-end against a real Purchase Order email -- also how the
+   `glocco.sk` query gap above was caught, since the real PO email didn't
+   match the `glocco.com`-only default at first. Outlook would need its
+   own attachment-fetch, same pattern.
 8. Extend PDF extraction with an LLM fallback for purchase orders that don't
    match this template's exact layout (job id format, "Total" line wording),
    the same way schedule extraction already has an LLM path alongside regex.

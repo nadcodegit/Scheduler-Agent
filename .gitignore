@@ -10,6 +10,9 @@ outputs/*.docx
 # Accumulates real approved-schedule state across runs (seeded once from
 # sample_data/sample_approved_schedule.json) -- not a fixed demo artifact.
 outputs/approved_schedule.json
+# A real Purchase Order PDF downloaded from Gmail -- may contain real
+# personal/financial data, never a fixed demo artifact.
+outputs/downloaded_purchase_order.pdf
 # Gmail OAuth client secret and cached user token -- never commit real
 # credentials.
 credentials.json

@@ -121,10 +121,18 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         if is_live_gmail_enabled():
             try:
-                email = fetch_latest_email()
+                pdf_save_path = self.invoice_output_dir / "downloaded_purchase_order.pdf" if self.invoice_output_dir else None
+                email = fetch_latest_email(save_pdf_attachment_to=pdf_save_path)
                 if email is not None:
                     self.state.email = email
                     self.state.memory_snapshot = self.memory.snapshot()
+                    if email.attachments and pdf_save_path is not None:
+                        # A PDF was actually found and saved this run -- V4 prefers
+                        # this over the static local sample. Empty attachments means
+                        # "none found", not "check the file": a stale download from a
+                        # previous run must never be silently reused.
+                        self.state.live_pdf_attachment_path = str(pdf_save_path)
+                        record_hook(self.state, "gmail_pdf_attachment_saved", filename=email.attachments[0])
                     record_hook(
                         self.state, "after_receive_email", subject=email.subject, sender=email.sender, source="gmail"
                     )
@@ -387,6 +395,11 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         period, and amount all live in the attached PDF, so this reads that
         PDF directly rather than email.body like the other handlers.
 
+        Prefers a PDF live Gmail actually downloaded from the classified
+        message this run (receive_email() sets live_pdf_attachment_path)
+        over the static local timesheet_pdf_path fallback -- the real
+        Purchase Order this timesheet email carries, when there is one.
+
         Fills the fixed invoice template's known monthly-varying cells
         (invoice number, date, job id, amount/total) and saves a new .docx
         locally -- it never uploads or submits anything. The human reviews
@@ -395,11 +408,12 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         record_hook(self.state, "before_handle_timesheet")
 
-        if self.timesheet_pdf_path is None or not self.timesheet_pdf_path.exists():
+        pdf_path = Path(self.state.live_pdf_attachment_path) if self.state.live_pdf_attachment_path else self.timesheet_pdf_path
+        if pdf_path is None or not pdf_path.exists():
             record_hook(self.state, "timesheet_pdf_missing")
             return None
 
-        data = parse_purchase_order_pdf(self.timesheet_pdf_path)
+        data = parse_purchase_order_pdf(pdf_path)
         self.state.timesheet_data = data
 
         if data is None:
