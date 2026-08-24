@@ -64,20 +64,40 @@ V1 focuses on the safest useful path:
 sample email -> classify email -> parse schedule -> validate events -> calendar-ready events
 ```
 
-`classify_email` had a real false-positive: a vendor email complaining about a
-late login for a *past* shift, and a separate one about a Criminal
-Background Check renewal *deadline*, both mention a date/time and were
-misclassified as `schedule` -- the CBC one especially, since neither
-"schedule" nor "roster" even appears in it, so the offline regex fallback
-correctly said `other`, but the live LLM crew got it wrong and, worse,
-extracted the complaint's referenced shift time as if it were a new
-calendar event. Fixed by adding explicit negative examples to the
-`classify_email` task prompt (`crews/schedule_crew/config/tasks.yaml`):
-a date/time appearing in the body isn't itself evidence of "schedule" --
-attendance feedback about a shift that already happened, and compliance/
-document-deadline reminders, are `other`. Re-verified live against both
-real emails afterward: both now classify as `other` with zero events
-extracted.
+`classify_email` had a real false-positive, found via three separate real
+vendor emails, all mentioning a date/time but none being an actual
+schedule: a complaint about a late login for a *past* shift (worse, the LLM
+extracted that referenced past time as a new calendar event); a Criminal
+Background Check renewal *deadline* notice (the offline regex fallback got
+this one right, since neither "schedule" nor "roster" appears in it -- only
+the live LLM crew got it wrong); and a scheduler's reply confirming a shift
+was *removed* from the roster after the interpreter reported an emergency
+(the LLM extracted the removed shift as a brand-new event titled "Shift
+removed" -- this system also has no delete/cancel workflow, so there was
+nothing correct to do with it either way). Fixed by adding explicit
+negative examples to the `classify_email` task prompt
+(`crews/schedule_crew/config/tasks.yaml`): a date/time appearing in the
+body isn't itself evidence of "schedule" -- past-shift attendance feedback,
+compliance/document deadlines, and shift-removal confirmations are all
+`other`. Re-verified live against all three real emails afterward: all
+classify as `other` with zero events extracted.
+
+A fourth one, from a real reply thread, turned out worse: after a
+"cancelled your shift" confirmation (which already correctly classified as
+`other`), a follow-up reply reinstating that same shift -- "Okay, I will
+assign you your originally scheduled shift back. Thank you." -- has no
+date/time in it at all, misclassified as `schedule`, and because
+`extract_schedule` found nothing in the body, `parse_schedule` fell through
+to the roster-image vision path and pulled in **five unrelated events from
+the static demo roster image** (`sample_data/sample_roster.png`, the
+default `--roster-image` fallback). A classification miss on a body with no
+parseable dates is more dangerous here than one with a wrong date, since it
+can silently substitute an entirely unrelated image's data. Fixed with a
+fourth negative example plus a tightened "schedule" definition (a short
+reply-thread status update on one already-known shift is not a proactive
+roster announcement, even when the wording sounds similar to one). Re-
+verified live, twice, against the real reply: `other` both times, zero
+events, no vision fallback triggered.
 
 V2 adds the coverage-request workflow. A real coverage email can offer
 *several* distinct slots at once -- specific dates, combined date/time
@@ -216,6 +236,8 @@ scheduler-agents/
 │   ├── sample_approved_schedule.json
 │   ├── sample_other_attendance_complaint_email.txt
 │   ├── sample_other_compliance_deadline_email.txt
+│   ├── sample_other_shift_removal_confirmation_email.txt
+│   ├── sample_other_shift_reinstated_confirmation_email.txt
 │   └── invoice_template.docx
 ├── src/
 │   └── scheduler_agents/

@@ -9,12 +9,16 @@ classify_email:
     Label definitions -- read carefully, "availability" is used in two
     different senses in real scheduler emails:
 
-    - schedule: the scheduler is sending a finalized table/list of upcoming
-      interpretation sessions. Vendors often call this a "roster" or "rota"
-      instead of "schedule" -- treat those as the same thing. The actual
-      slot data may be in an attached table/image rather than the email
-      text; classify as schedule regardless of whether the body itself
-      contains parseable dates.
+    - schedule: the scheduler is proactively sending a finalized table/list
+      of upcoming interpretation sessions -- a genuine roster/rota
+      announcement, not a reply. Vendors often call this a "roster" or
+      "rota" instead of "schedule" -- treat those as the same thing. The
+      actual slot data may be in an attached table/image rather than the
+      email text; classify as schedule regardless of whether the body
+      itself contains parseable dates. A short reply-thread message about
+      the status of ONE shift the interpreter already knows about
+      (cancelled, reinstated, reassigned, confirmed) is NOT this -- see the
+      "other" examples below, especially the last one.
     - coverage_request: the scheduler has open/extra hours and is asking the
       interpreter to pick them up -- including phrasing like "we have
       availability from X-Y, can you stay logged in longer / take additional
@@ -45,10 +49,30 @@ classify_email:
           Permit by August 31" or any document/certification expiry
           notice) -- the date here is a submission deadline, not an
           interpretation time slot.
+        * A confirmation that an existing shift is being REMOVED/
+          cancelled from the roster (e.g. replying to the interpreter's
+          own emergency/unavailability notice with "OK, I've removed
+          your 10am-12pm shift on August 20, no action needed"). The
+          date here describes a slot being taken away, not one to add
+          -- and this system has no delete/cancel workflow at all, so
+          there is nothing to do with it either way.
+        * A short reply confirming a PREVIOUSLY-cancelled shift is back
+          on, or reassigned, or otherwise just confirming status on ONE
+          shift the interpreter already knows about -- even when it has
+          no date/time in it at all (e.g. "Okay, I will assign you your
+          originally scheduled shift back. Thank you."). This is easy to
+          mis-read as a genuine new assignment because the wording sounds
+          similar, but it's status confirmation in an ongoing reply
+          thread about a shift that's already on the roster, not a new
+          schedule being sent. The giveaway: it's a short reply
+          ("Re: ..." subject, one or two sentences), not a proactive
+          table/list of sessions.
       The test that actually matters: would logging this email's dates as
-      calendar events be useful or nonsensical? A genuine schedule email
-      announces slots the interpreter should show up for; these two
-      examples do not.
+      NEW calendar events be useful or nonsensical? A genuine schedule
+      email announces slots the interpreter should show up for; none of
+      these four examples do -- they reference a shift for an unrelated
+      reason (past feedback, an administrative deadline, a removal, a
+      status confirmation), not to add anything to the calendar.
 
     Return one label only:
     schedule, coverage_request, availability_request, timesheet, or other.
