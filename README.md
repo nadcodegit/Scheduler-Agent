@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-83%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -195,9 +195,18 @@ slots -- with zero parseable text in the email body, and no text layer for
 regex or the text-only CrewAI agents to read. `parse_schedule` tries, in
 order: LLM (already done in `classify_email` if it found anything) -> regex
 over `email.body` -> a vision-capable LLM call over the roster image. This is
-a plain API call (Groq's `qwen/qwen3.6-27b`), not a CrewAI agent, since it's
-one single-shot "describe this image as JSON" call rather than multi-step
-reasoning. It also reads the roster's own timezone label (e.g. "UK") from the
+a plain `litellm.completion()` call, not a CrewAI agent, since it's one
+single-shot "describe this image as JSON" call rather than multi-step
+reasoning. A roster screenshot has no parseable text, so there's no regex
+fallback possible here the way every other extraction path has one --
+instead, `parse_roster_image` tries each of several curated
+known-vision-capable models in priority order (Groq's `qwen/qwen3.6-27b`,
+then `gpt-4o-mini`, then Gemini's `gemini-2.0-flash`) until one succeeds,
+skipping straight to the next configured candidate on failure. This is
+deliberately not the same `MODEL` env var every other LLM call in this
+project follows -- `MODEL` is usually chosen for classification/coverage
+text tasks and isn't necessarily vision-capable. It also reads the roster's
+own timezone label (e.g. "UK") from the
 column headers, since that can differ from the interpreter's own default
 timezone. As with every other LLM path in this project, the deterministic
 guardrail (`validate_schedule_events`) always re-runs over whatever it
@@ -321,11 +330,11 @@ always runs first; `ScheduleExtractionCrew`
 classification actually comes back `schedule`, instead of every email
 paying for extraction/validation LLM calls whose output would just be
 discarded. Coverage-slot extraction (V2) and roster-image extraction (V5)
-are each one single-shot "read this as JSON" call -- via
-`litellm.completion()` for coverage (so it follows whatever `MODEL` is
-configured, same as the crews) and a direct Groq vision call for the
-roster image (Groq is currently the only configured provider with vision
-support here). A CrewAI Task/Crew would add ceremony without adding
+are each one single-shot "read this as JSON" call via `litellm.completion()`
+-- coverage follows whatever `MODEL` is configured, same as the crews;
+roster vision instead tries its own curated list of known-vision-capable
+models (see "Milestones" above), since `MODEL` isn't necessarily
+vision-capable. A CrewAI Task/Crew would add ceremony without adding
 anything for either of those.
 
 This project is pinned to Python 3.12 via `.python-version` (crewai's
@@ -516,9 +525,16 @@ API being up.
 8. Extend PDF extraction with an LLM fallback for purchase orders that don't
    match this template's exact layout (job id format, "Total" line wording),
    the same way schedule extraction already has an LLM path alongside regex.
-9. Roster vision extraction only supports Groq (`qwen/qwen3.6-27b`) today and
-   has no LLM-provider fallback if that key/model isn't configured -- unlike
-   every other extraction path in this project.
+9. ~~Roster vision extraction only supports Groq, no provider fallback~~ --
+   done: `parse_roster_image` now tries a curated list of known-vision-
+   capable models in priority order (`groq/qwen/qwen3.6-27b` -> `gpt-4o-mini`
+   -> `gemini/gemini-2.0-flash`, whichever have API keys set), falling
+   through to the next configured one on failure rather than giving up
+   after the first. Deliberately its own list, not the shared `MODEL` env
+   var -- that's usually a text model chosen for classification/coverage,
+   not necessarily vision-capable. Re-verified live against the real
+   sample roster through the new `litellm.completion()`-based call --
+   identical 5-event result as before the rewrite.
 10. ~~Roster/coverage extraction has no per-slot language~~ -- done, then
     simplified further: language isn't extracted or validated per event at
     all anymore. `UserMemory.default_language` (default `"Persian"`) is
