@@ -52,7 +52,11 @@ from scheduler_agents.tools.invoice_tool import fill_invoice_template
 from scheduler_agents.tools.roster_vision_tool import parse_roster_image, resolve_timezone
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
 from scheduler_agents.tools.schedule_store import load_approved_schedule, save_approved_schedule
-from scheduler_agents.tools.timesheet_tool import parse_purchase_order_pdf
+from scheduler_agents.tools.timesheet_tool import (
+    extract_purchase_order_via_llm,
+    parse_purchase_order_text,
+    read_purchase_order_pdf_text,
+)
 
 
 def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
@@ -413,7 +417,19 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             record_hook(self.state, "timesheet_pdf_missing")
             return None
 
-        data = parse_purchase_order_pdf(pdf_path)
+        pdf_text = read_purchase_order_pdf_text(pdf_path)
+        data = parse_purchase_order_text(pdf_text)
+
+        if data is None and llm_is_configured():
+            # This vendor's own layout matches the regex almost always;
+            # the LLM fallback exists for a purchase order that doesn't --
+            # a different job-id format, unusual "Total" line wording, etc.
+            try:
+                data = extract_purchase_order_via_llm(pdf_text)
+                record_hook(self.state, "timesheet_extracted_by_llm")
+            except Exception as exc:  # LLM/network failures never crash the flow
+                record_hook(self.state, "timesheet_llm_extraction_failed", error=str(exc))
+
         self.state.timesheet_data = data
 
         if data is None:

@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-83%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-87%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -169,8 +169,14 @@ V4 adds the timesheet/invoice workflow. Here the vendor's monthly
 notification email body carries no usable data at all ("please find
 attached the Purchase Order...") -- job id, period, and amount all live in
 the attached PDF, so this is the one workflow that reads a PDF directly
-instead of `email.body`. It fills only the known monthly-varying cells in a
-fixed Word invoice template (invoice number, date, job id, amount/total) and
+instead of `email.body`. Extraction tries a regex parser first (matches
+this vendor's usual layout) -- `extract_purchase_order_via_llm`
+(`timesheet_tool.py`) is a single-shot `litellm.completion()` fallback for
+a purchase order that doesn't (a different job-id format, unusual "Total"
+line wording), the same single-shot "read this as JSON" pattern as
+coverage/roster extraction, not a CrewAI crew, since there's no multi-step
+reasoning here. It fills only the known monthly-varying cells in a fixed
+Word invoice template (invoice number, date, job id, amount/total) and
 saves a new `.docx` locally -- it never uploads or submits anything to the
 vendor platform; the human reviews and submits it themselves. Every static
 field (name, address, bank details, bill-to) is left untouched.
@@ -522,9 +528,13 @@ API being up.
    `glocco.sk` query gap above was caught, since the real PO email didn't
    match the `glocco.com`-only default at first. Outlook would need its
    own attachment-fetch, same pattern.
-8. Extend PDF extraction with an LLM fallback for purchase orders that don't
-   match this template's exact layout (job id format, "Total" line wording),
-   the same way schedule extraction already has an LLM path alongside regex.
+8. ~~Extend PDF extraction with an LLM fallback~~ -- done:
+   `extract_purchase_order_via_llm` (`timesheet_tool.py`) is a single-shot
+   `litellm.completion()` call, tried only when the regex parser (this
+   vendor's usual layout) returns nothing. Re-verified live: fed a
+   deliberately reworded purchase order (different job-id format, no
+   "Total" line at all) -- the regex parser correctly returned `None`, and
+   the LLM fallback correctly extracted all three fields anyway.
 9. ~~Roster vision extraction only supports Groq, no provider fallback~~ --
    done: `parse_roster_image` now tries a curated list of known-vision-
    capable models in priority order (`groq/qwen/qwen3.6-27b` -> `gpt-4o-mini`

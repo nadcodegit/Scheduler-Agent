@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date
 from pathlib import Path
 
 import docx
+import pytest
 
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
 from scheduler_agents.models.state import TimesheetData
 from scheduler_agents.tools.invoice_tool import fill_invoice_template
-from scheduler_agents.tools.timesheet_tool import parse_purchase_order_pdf, parse_purchase_order_text
+from scheduler_agents.tools.timesheet_tool import (
+    extract_purchase_order_via_llm,
+    parse_purchase_order_pdf,
+    parse_purchase_order_text,
+)
 
 SAMPLE_DATA = Path(__file__).resolve().parents[1] / "sample_data"
 
@@ -152,3 +158,92 @@ def test_scheduler_flow_prefers_live_pdf_attachment_over_static_path(tmp_path: P
 
     assert state.timesheet_data is not None
     assert state.timesheet_data.job_id == "2026/1234/#1/1"
+
+
+def test_extract_purchase_order_via_llm_raises_without_model(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("MODEL", raising=False)
+
+    with pytest.raises(RuntimeError):
+        extract_purchase_order_via_llm("some purchase order text")
+
+
+def test_extract_purchase_order_via_llm_parses_response(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MODEL", "gemini/gemini-1.5-flash")
+
+    class _FakeMessage:
+        content = json.dumps({"job_id": "2026/9999/#2/1", "period": "October 2026", "total_amount": 250.5})
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    monkeypatch.setattr(
+        "scheduler_agents.tools.timesheet_tool.litellm.completion",
+        lambda **kwargs: _FakeResponse(),
+    )
+
+    data = extract_purchase_order_via_llm("some unusual purchase order layout")
+
+    assert data.job_id == "2026/9999/#2/1"
+    assert data.period == "October 2026"
+    assert data.total_amount == 250.5
+
+
+def test_scheduler_flow_falls_back_to_llm_when_pdf_layout_does_not_match_regex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A purchase order PDF with a differently-formatted layout (unusual job
+    id, no regex-recognized Total line) must not just fail -- when an LLM
+    is configured, it's used as a fallback, same as every other extraction
+    path in this project."""
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.llm_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.read_purchase_order_pdf_text",
+        lambda path: "This purchase order uses a layout the regex parser doesn't recognize at all.",
+    )
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.extract_purchase_order_via_llm",
+        lambda text: TimesheetData(job_id="2026/7777/#1/1", period="November 2026", total_amount=99.99),
+    )
+
+    flow = SchedulerFlow(
+        sample_email_path=SAMPLE_DATA / "sample_purchase_order_email.txt",
+        # Exists, but its real text is irrelevant -- read_purchase_order_pdf_text is mocked above.
+        timesheet_pdf_path=SAMPLE_DATA / "sample_purchase_order.pdf",
+        invoice_template_path=SAMPLE_DATA / "invoice_template.docx",
+        invoice_output_dir=tmp_path,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.timesheet_data.job_id == "2026/7777/#1/1"
+    assert any(hook.name == "timesheet_extracted_by_llm" for hook in state.hooks)
+
+
+def test_scheduler_flow_reports_unparseable_when_llm_fallback_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.llm_is_configured", lambda: True)
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.read_purchase_order_pdf_text",
+        lambda path: "unrecognized layout",
+    )
+
+    def failing_extract(text):
+        raise RuntimeError("bad JSON from model")
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.extract_purchase_order_via_llm", failing_extract)
+
+    flow = SchedulerFlow(
+        sample_email_path=SAMPLE_DATA / "sample_purchase_order_email.txt",
+        timesheet_pdf_path=SAMPLE_DATA / "sample_purchase_order.pdf",
+        invoice_template_path=SAMPLE_DATA / "invoice_template.docx",
+        invoice_output_dir=tmp_path,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.timesheet_data is None
+    assert any(hook.name == "timesheet_llm_extraction_failed" for hook in state.hooks)
+    assert any(hook.name == "timesheet_pdf_unparseable" for hook in state.hooks)
