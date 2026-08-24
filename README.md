@@ -16,7 +16,7 @@ deterministic guardrail before anything reaches a calendar.
 
 ```mermaid
 flowchart TD
-    start["📧 sample_data/*.txt<br/>or live Gmail (opt-in, read-only)"] --> classify["classify_email()<br/>LLM (3 CrewAI agents) → regex fallback"]
+    start["📧 sample_data/*.txt<br/>or live Gmail (opt-in, read-only)"] --> classify["classify_email()<br/>LLM (2 CrewAI crews, extraction gated on type) → regex fallback"]
     classify --> router{route_email}
 
     router -->|schedule| sched1
@@ -312,15 +312,21 @@ deterministic one (`guardrails/schedule_guardrails.py`) — the LLM is trusted
 to extract data, never to decide on its own that data is safe to write to a
 calendar.
 
-Not every LLM call in this project goes through the 3-agent CrewAI crew:
-that crew is specifically for schedule classification/extraction, where
-multi-step agent handoffs (classify -> extract -> validate) are the point.
-Coverage-slot extraction (V2) and roster-image extraction (V5) are each one
-single-shot "read this as JSON" call -- via `litellm.completion()` for
-coverage (so it follows whatever `MODEL` is configured, same as the crew)
-and a direct Groq vision call for the roster image (Groq is currently the
-only configured provider with vision support here). A CrewAI Task/Crew
-would add ceremony without adding anything for either of those.
+Not every LLM call in this project goes through CrewAI crews: those are
+specifically for schedule classification/extraction, where multi-step
+agent handoffs (classify -> extract -> validate) are the point. Even there,
+it's two crews, not one -- `ClassifyEmailCrew` (`inbox_intelligence_agent`)
+always runs first; `ScheduleExtractionCrew`
+(`schedule_parser_agent` + `schedule_validator_agent`) only kicks off when
+classification actually comes back `schedule`, instead of every email
+paying for extraction/validation LLM calls whose output would just be
+discarded. Coverage-slot extraction (V2) and roster-image extraction (V5)
+are each one single-shot "read this as JSON" call -- via
+`litellm.completion()` for coverage (so it follows whatever `MODEL` is
+configured, same as the crews) and a direct Groq vision call for the
+roster image (Groq is currently the only configured provider with vision
+support here). A CrewAI Task/Crew would add ceremony without adding
+anything for either of those.
 
 This project is pinned to Python 3.12 via `.python-version` (crewai's
 dependency chain lags behind the newest CPython releases).
@@ -486,9 +492,19 @@ API being up.
    (requires `MODEL`/an API key -- the regex fallback still only handles the
    strict explicit-date format, by design.)
 5. Add CrewAI eval cases for classification, parsing, and safe tool use.
-6. Split classification from extraction so the extractor/validator agents
-   only run once an email is already known to be a schedule email, instead
-   of always running the full three-task crew.
+6. ~~Split classification from extraction~~ -- done: `crew.py` now has two
+   crews, `ClassifyEmailCrew` (runs on every email) and
+   `ScheduleExtractionCrew` (`extract_schedule` + `validate_schedule`,
+   kicked off only when classification actually comes back `schedule`).
+   `run_llm_pipeline()` orchestrates the two-step decision in plain Python
+   -- the same "let deterministic code branch, don't pay an LLM to decide
+   something already knowable" principle `route_email()`'s `@router`
+   already uses, considered and rejected the CrewAI Hierarchical process
+   for this exact reason (a manager-agent LLM call to make a decision a
+   plain `if` already makes correctly). Re-verified live across all three
+   paths (schedule, coverage_request, other) -- classification and
+   extraction/validation still produce identical results, non-schedule
+   emails no longer trigger the extraction crew at all.
 7. ~~Read the vendor's real PDF attachment straight from Gmail~~ -- done:
    `gmail_tool.py` downloads the PDF off the classified message
    (`gmail.readonly` already covers attachment bytes) and `handle_timesheet`
@@ -520,7 +536,7 @@ API being up.
 The project includes the same course-style separation used in the assignment:
 
 - `crews/schedule_crew/config/agents.yaml` for agent role, goal, and backstory.
-- `crews/schedule_crew/config/tasks.yaml` for task descriptions, expected outputs, context, and async execution.
+- `crews/schedule_crew/config/tasks.yaml` for task descriptions, expected outputs, and context.
 - `crews/schedule_crew/crew.py` for `@CrewBase`, `@agent`, `@task`, and `@crew` decorators.
 - `crews/schedule_crew/guardrails/guardrails.py` for task output validation.
 

@@ -72,8 +72,13 @@ class PipelineResult(BaseModel):
 
 
 @CrewBase
-class ScheduleCrew:
-    """YAML-configured CrewAI crew following the course project pattern."""
+class ClassifyEmailCrew:
+    """Just the classification step, split out from extraction/validation
+    (see ScheduleExtractionCrew below) so those only ever run for an email
+    already known to be a schedule email, instead of on every email
+    regardless of type -- their output was being discarded for anything
+    that wasn't `schedule` anyway.
+    """
 
     base_dir = Path(__file__).parent
     agents_config = str(base_dir / "config" / "agents.yaml")
@@ -92,6 +97,34 @@ class ScheduleCrew:
             memory=False,
         )
 
+    @task
+    def classify_email(self) -> Task:
+        return Task(
+            config=self.tasks_config["classify_email"],
+            guardrail=validate_email_type,
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=True,
+            memory=False,
+        )
+
+
+@CrewBase
+class ScheduleExtractionCrew:
+    """Extraction + validation -- only ever kicked off once ClassifyEmailCrew
+    has already said this email is a schedule email.
+    """
+
+    base_dir = Path(__file__).parent
+    agents_config = str(base_dir / "config" / "agents.yaml")
+    tasks_config = str(base_dir / "config" / "tasks.yaml")
+
     @agent
     def schedule_parser_agent(self) -> Agent:
         return Agent(
@@ -109,18 +142,14 @@ class ScheduleCrew:
         )
 
     @task
-    def classify_email(self) -> Task:
-        return Task(
-            config=self.tasks_config["classify_email"],
-            guardrail=validate_email_type,
-        )
-
-    @task
     def extract_schedule(self) -> Task:
+        # No async_execution here: that flag existed to overlap this task's
+        # wall-clock time with classify_email inside one shared crew: now
+        # that classification is its own crew run to completion first,
+        # there's nothing left for this task to run concurrently with.
         return Task(
             config=self.tasks_config["extract_schedule"],
             guardrail=validate_schedule_json,
-            async_execution=True,
         )
 
     @task
@@ -132,7 +161,7 @@ class ScheduleCrew:
         # the actual approval decision anyway -- validate_schedule_events()
         # (the deterministic guardrail) always re-checks the extracted
         # events, so this task only needs to run for the demonstrated
-        # 3-agent pipeline, not for correctness.
+        # multi-agent pipeline, not for correctness.
         return Task(config=self.tasks_config["validate_schedule"])
 
     @crew
@@ -147,7 +176,13 @@ class ScheduleCrew:
 
 
 async def run_llm_pipeline(email_text: str) -> PipelineResult:
-    """Run the full classify -> extract -> validate crew for one email.
+    """Classify first; only run extraction/validation when the email turns
+    out to actually be a schedule email. Previously this always ran the
+    full three-task crew regardless of classification, wasting 1-2 LLM
+    calls (and rate-limit budget, which this project has hit in practice
+    on Groq's free tier) extracting/validating data the flow was always
+    going to discard for a coverage_request/availability_request/
+    timesheet/other email.
 
     Uses kickoff_async because the flow drives everything through
     asyncio.run(); crewai's synchronous kickoff() refuses to run inside an
@@ -160,22 +195,27 @@ async def run_llm_pipeline(email_text: str) -> PipelineResult:
     if Crew is None:
         raise RuntimeError("crewai is not installed.")
 
-    output = await ScheduleCrew().crew().kickoff_async(inputs={"email": email_text})
-    tasks_output = list(output.tasks_output)
+    classify_output = await ClassifyEmailCrew().crew().kickoff_async(inputs={"email": email_text})
+    classify_tasks_output = list(classify_output.tasks_output)
+    email_type = str(classify_tasks_output[0].raw).strip().lower() if classify_tasks_output else "other"
 
-    email_type = str(tasks_output[0].raw).strip().lower() if tasks_output else "other"
+    if email_type != "schedule":
+        return PipelineResult(email_type=email_type)
+
+    extraction_output = await ScheduleExtractionCrew().crew().kickoff_async(inputs={"email": email_text})
+    tasks_output = list(extraction_output.tasks_output)
 
     raw_events: list[dict] = []
-    if len(tasks_output) > 1 and tasks_output[1].raw:
+    if tasks_output and tasks_output[0].raw:
         try:
-            parsed = json.loads(tasks_output[1].raw)
+            parsed = json.loads(tasks_output[0].raw)
             if isinstance(parsed, list):
                 raw_events = [item for item in parsed if isinstance(item, dict)]
         except json.JSONDecodeError:
             raw_events = []
 
     validation: ScheduleValidationResult | None = None
-    if len(tasks_output) > 2:
-        validation = tasks_output[2].pydantic
+    if len(tasks_output) > 1:
+        validation = tasks_output[1].pydantic
 
     return PipelineResult(email_type=email_type, raw_events=raw_events, validation=validation)
