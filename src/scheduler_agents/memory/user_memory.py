@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -8,13 +8,11 @@ class UserMemory:
     """Local non-secret memory for stable user preferences."""
 
     timezone: str = "Asia/Yerevan"
-    languages: list[str] = field(default_factory=lambda: ["English", "Turkish", "Persian"])
-    # This vendor relationship is Persian-only, and real schedule/roster/
-    # coverage emails never state a language at all -- it's implicit
-    # context on their side. Extraction paths (LLM crew, regex, roster
-    # vision) backfill a missing language from this rather than leaving it
-    # unset, so the deterministic guardrail validates real data instead of
-    # false-positive-blocking on a field the source was never going to have.
+    # This vendor relationship is Persian interpretation only -- a known
+    # fact about the interpreter's employment, not per-email data. Every
+    # schedule event and coverage slot gets this assigned unconditionally
+    # (see scheduler_flow.py's validate_schedule/handle_coverage_request),
+    # not extracted or validated per email.
     default_language: str = "Persian"
     scheduler_email: str = "scheduler@example.com"
     calendar_name: str = "Work"
@@ -23,7 +21,6 @@ class UserMemory:
     def snapshot(self) -> dict[str, object]:
         return {
             "timezone": self.timezone,
-            "languages": list(self.languages),
             "default_language": self.default_language,
             "scheduler_email": self.scheduler_email,
             "calendar_name": self.calendar_name,

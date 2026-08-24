@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -114,7 +114,10 @@ correctly left out and flagged, not guessed).
 Each extracted slot is checked against the local approved-schedule store for
 conflicts (context only, see "Approved Schedule Store" below) and then the
 human is asked directly -- "Can you cover this shift? (y/n)" -- one slot at a
-time; the conflict check never decides for them. Accepting a slot commits it
+time. The CLI prompt states the conflict result explicitly either way
+("Conflict: yes/no"), not just as a warning when there happens to be one, so
+silence is never ambiguous with "conflict wasn't even checked"; the check
+itself never decides for them. Accepting a slot commits it
 immediately (not just for future emails): if the same request offers two
 overlapping slots, accepting the first makes the second show up as a
 conflict too. One combined reply is drafted covering every slot; accepted
@@ -169,11 +172,12 @@ column headers, since that can differ from the interpreter's own default
 timezone. As with every other LLM path in this project, the deterministic
 guardrail (`validate_schedule_events`) always re-runs over whatever it
 extracts. Real rosters have no language column at all -- this vendor
-relationship is Persian-only, so it's implicit context, never written down
--- so a missing language is backfilled from `UserMemory.default_language`
-(see `validate_schedule` in `scheduler_flow.py`) rather than treated as
-missing data; the guardrail still blocks on anything it can't reconcile
-this way (e.g. an actually unsupported language value).
+relationship is Persian interpretation only, a known fact about the
+interpreter's employment, not per-email data -- so `validate_schedule` (V1)
+and `handle_coverage_request` (V2) assign `UserMemory.default_language` to
+every event/slot unconditionally rather than treating it as something to
+extract or validate; `validate_schedule_events` has no language check at
+all as a result.
 
 ```text
 roster screenshot -> vision LLM -> events + timezone label -> deterministic guardrail -> calendar (or blocked + approval)
@@ -457,14 +461,17 @@ API being up.
 9. Roster vision extraction only supports Groq (`qwen/qwen3.6-27b`) today and
    has no LLM-provider fallback if that key/model isn't configured -- unlike
    every other extraction path in this project.
-10. ~~Roster/coverage extraction has no per-slot language~~ -- done:
-    `UserMemory.default_language` (default `"Persian"`, matching this
-    project's real single-vendor, single-language use case) backfills a
-    missing language at `validate_schedule` (V1) and in
-    `handle_coverage_request` (V2), the two choke points every extraction
-    path passes through. Verified live against a real roster email that
-    previously tripped "Missing language" on every one of 5 rows -- now 0
-    validation errors, 5/5 calendar payloads created.
+10. ~~Roster/coverage extraction has no per-slot language~~ -- done, then
+    simplified further: language isn't extracted or validated per event at
+    all anymore. `UserMemory.default_language` (default `"Persian"`) is
+    assigned unconditionally in `validate_schedule` (V1) and
+    `handle_coverage_request` (V2) -- the two choke points every extraction
+    path passes through -- because this project automates one real vendor
+    relationship where the language is a fixed fact, not per-email data.
+    `validate_schedule_events` no longer has a language check at all.
+    Verified live against a real roster email that previously tripped
+    "Missing language" on every one of 5 rows -- now 0 validation errors,
+    5/5 calendar payloads created, each correctly showing "Language: Persian".
 
 ## Course-Style CrewAI Pieces
 

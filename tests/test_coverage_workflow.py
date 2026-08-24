@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scheduler_agents.flows.scheduler_flow import SchedulerFlow
+from scheduler_agents.flows.scheduler_flow import SchedulerFlow, ask_user_can_cover_via_cli
 from scheduler_agents.models.state import CoverageDecision, CoverageSlot, CoverageSlotDecision, ScheduleEvent
 from scheduler_agents.tools.coverage_tool import (
     _build_relative_date_hints,
@@ -504,3 +504,21 @@ def test_scheduler_flow_defaults_coverage_slot_language_from_user_memory(
     assert state.coverage_slots[0].language == "Persian"
     assert "Unknown" not in state.coverage_reply_draft
     assert "Persian" in state.coverage_reply_draft
+
+
+def test_cli_prompt_states_conflict_status_explicitly_either_way(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """The conflict line must appear either way (yes or no), not just as a
+    warning when there happens to be one -- otherwise silence before the
+    y/n question is ambiguous with "no conflict was even checked"."""
+
+    slot = CoverageSlot(date="2026-09-10", start_time="14:00", end_time="16:00", language="Persian")
+
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    ask_user_can_cover_via_cli(slot, conflict=False)
+    assert "Conflict: no." in capsys.readouterr().out
+
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    ask_user_can_cover_via_cli(slot, conflict=True)
+    assert "Conflict: yes" in capsys.readouterr().out
