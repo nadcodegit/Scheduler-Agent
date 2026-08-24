@@ -27,7 +27,11 @@ def validate_schedule_json(output: Any) -> tuple[bool, Any]:
     if not isinstance(data, list):
         return False, "Schedule extraction output must be a JSON array."
 
-    required = {"date", "start_time", "end_time", "language"}
+    # language/title/source are fixed, known facts filled in deterministically
+    # elsewhere in this project (see extraction_tasks.yaml's extract_schedule
+    # description) -- not per-email data the model should be required to
+    # invent a value for.
+    required = {"date", "start_time", "end_time"}
     for index, item in enumerate(data, start=1):
         if not isinstance(item, dict):
             return False, f"Schedule item {index} must be an object."

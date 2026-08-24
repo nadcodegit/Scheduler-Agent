@@ -1,0 +1,29 @@
+extract_schedule:
+  description: >
+    Extract all interpretation schedule rows from this email.
+
+    Email:
+    {email}
+
+    Return strict JSON records with only date, start_time, and end_time --
+    the three things that actually vary per row. Do NOT include language,
+    title, or source: this project automates one real vendor relationship
+    where those are fixed, known facts (not per-email data), filled in
+    deterministically elsewhere -- inventing a value for them here (e.g. an
+    empty title) would only overwrite that correct fixed value with a wrong
+    guessed one. Use ISO date format YYYY-MM-DD and 24-hour HH:MM times.
+  expected_output: >
+    A JSON array of schedule event objects. Each object must include only
+    date, start_time, and end_time.
+  agent: schedule_parser_agent
+
+validate_schedule:
+  description: >
+    Validate the schedule records extracted by the previous task. Check for
+    missing required fields, invalid time ranges, duplicate events,
+    unsupported languages, and anything that should require human approval.
+  expected_output: >
+    A JSON object with fields: valid, errors, approval_required, and summary.
+  agent: schedule_validator_agent
+  context:
+    - extract_schedule

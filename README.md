@@ -76,7 +76,7 @@ was *removed* from the roster after the interpreter reported an emergency
 removed" -- this system also has no delete/cancel workflow, so there was
 nothing correct to do with it either way). Fixed by adding explicit
 negative examples to the `classify_email` task prompt
-(`crews/schedule_crew/config/tasks.yaml`): a date/time appearing in the
+(`crews/schedule_crew/config/classify_tasks.yaml`): a date/time appearing in the
 body isn't itself evidence of "schedule" -- past-shift attendance feedback,
 compliance/document deadlines, and shift-removal confirmations are all
 `other`. Re-verified live against all three real emails afterward: all
@@ -247,6 +247,8 @@ scheduler-agents/
 ├── pyproject.toml
 ├── .env.example
 ├── README.md
+├── evals/
+│   └── run_eval.py
 ├── sample_data/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
@@ -271,8 +273,10 @@ scheduler-agents/
 │       │   └── schedule_crew/
 │       │       ├── crew.py
 │       │       ├── config/
-│       │       │   ├── agents.yaml
-│       │       │   └── tasks.yaml
+│       │       │   ├── classify_agents.yaml
+│       │       │   ├── classify_tasks.yaml
+│       │       │   ├── extraction_agents.yaml
+│       │       │   └── extraction_tasks.yaml
 │       │       └── guardrails/
 │       │           └── guardrails.py
 │       ├── flows/
@@ -479,6 +483,40 @@ those env vars for every test, so the suite always exercises the
 deterministic path — fast, offline, free, and not dependent on a third-party
 API being up.
 
+## Evals
+
+`pytest` is deliberately LLM-free (see above); the LLM path is checked
+separately with a live evaluation script, `evals/run_eval.py`, that needs a
+real `MODEL`/API key:
+
+```bash
+uv run python evals/run_eval.py
+```
+
+It classifies (and, for the `schedule` cases, extracts) 12 real sample
+emails and asserts each against a known-correct expected result: the right
+`email_type` label, and for the four real vendor false-positives
+`classify_email`'s prompt was hardened against this session (a complaint
+about a past shift, a compliance deadline, a shift-removal confirmation,
+a shift-reinstatement confirmation), that zero events get extracted -- not
+just the right label, but no side effect either. Retries once on
+`litellm.RateLimitError` with a fixed backoff, since Groq's free tier caps
+at 8000 tokens/minute and running every case back-to-back reliably exceeds
+it partway through.
+
+This isn't a formality: on its first real run, it immediately caught the
+item-6 regression described above (`ClassifyEmailCrew` crashing with
+`KeyError` on every call, silently masked by the regex fallback) --
+exactly the kind of bug that "verify live once, manually, with a sample
+that happens to work either way" doesn't catch, but a repeatable eval
+suite does. Fixing it also surfaced a second issue only visible once the
+LLM extraction path actually ran for the first time all session: the model
+returned an empty `title` for every schedule event (silently blanking real
+calendar event summaries), fixed by no longer asking the extraction task
+for `language`/`title`/`source` at all -- those are fixed, known facts for
+this one vendor relationship, not per-email data -- plus a defensive
+backfill in `validate_schedule` in case a model sends one anyway.
+
 ## Next Steps
 
 1. ~~Replace the sample email input with real ingestion~~ -- done for
@@ -506,7 +544,9 @@ API being up.
 
    (requires `MODEL`/an API key -- the regex fallback still only handles the
    strict explicit-date format, by design.)
-5. Add CrewAI eval cases for classification, parsing, and safe tool use.
+5. ~~Add CrewAI eval cases for classification, parsing, and safe tool use~~
+   -- done: see "Evals" below. Immediately caught a real, previously
+   undetected regression from item 6, on its very first run.
 6. ~~Split classification from extraction~~ -- done: `crew.py` now has two
    crews, `ClassifyEmailCrew` (runs on every email) and
    `ScheduleExtractionCrew` (`extract_schedule` + `validate_schedule`,
@@ -516,10 +556,21 @@ API being up.
    something already knowable" principle `route_email()`'s `@router`
    already uses, considered and rejected the CrewAI Hierarchical process
    for this exact reason (a manager-agent LLM call to make a decision a
-   plain `if` already makes correctly). Re-verified live across all three
-   paths (schedule, coverage_request, other) -- classification and
-   extraction/validation still produce identical results, non-schedule
-   emails no longer trigger the extraction crew at all.
+   plain `if` already makes correctly).
+
+   **This split shipped broken and stayed that way for three more commits**
+   (items 7-9 below) before the eval suite (item 5) caught it: crewai's
+   `CrewBase` resolves every task entry in a shared `tasks.yaml` against
+   the *current* class's own agents regardless of which tasks are actually
+   decorated in that class, so `ClassifyEmailCrew` crashed with
+   `KeyError: 'schedule_parser_agent'` on literally every call --
+   `scheduler_flow.py`'s except-and-fall-back-to-regex handler caught it
+   silently every time, and regex happened to classify every sample email
+   used for "live verification" the same way the LLM would have, so
+   nothing looked wrong from the outside. Fixed by giving each crew its
+   own config files (`classify_agents.yaml`/`classify_tasks.yaml` vs.
+   `extraction_agents.yaml`/`extraction_tasks.yaml`) instead of sharing
+   one. See "Evals" below for how this was actually caught and re-verified.
 7. ~~Read the vendor's real PDF attachment straight from Gmail~~ -- done:
    `gmail_tool.py` downloads the PDF off the classified message
    (`gmail.readonly` already covers attachment bytes) and `handle_timesheet`
@@ -527,7 +578,10 @@ API being up.
    end-to-end against a real Purchase Order email -- also how the
    `glocco.sk` query gap above was caught, since the real PO email didn't
    match the `glocco.com`-only default at first. Outlook would need its
-   own attachment-fetch, same pattern.
+   own attachment-fetch, same pattern. (This item's own logic -- attachment
+   download/parse/invoice-fill -- doesn't depend on *how* the email got
+   classified `timesheet`, so it's unaffected by item 6's regression below;
+   the regex fallback classifies "Purchase Order" mail correctly too.)
 8. ~~Extend PDF extraction with an LLM fallback~~ -- done:
    `extract_purchase_order_via_llm` (`timesheet_tool.py`) is a single-shot
    `litellm.completion()` call, tried only when the regex parser (this
@@ -544,7 +598,10 @@ API being up.
    var -- that's usually a text model chosen for classification/coverage,
    not necessarily vision-capable. Re-verified live against the real
    sample roster through the new `litellm.completion()`-based call --
-   identical 5-event result as before the rewrite.
+   identical 5-event result as before the rewrite. (Same independence note
+   as item 7: vision extraction runs once `email_type == "schedule"`,
+   regardless of which classifier path set it, so item 6's concurrent
+   regression didn't affect this item's own tested behavior either.)
 10. ~~Roster/coverage extraction has no per-slot language~~ -- done, then
     simplified further: language isn't extracted or validated per event at
     all anymore. `UserMemory.default_language` (default `"Persian"`) is
@@ -561,8 +618,11 @@ API being up.
 
 The project includes the same course-style separation used in the assignment:
 
-- `crews/schedule_crew/config/agents.yaml` for agent role, goal, and backstory.
-- `crews/schedule_crew/config/tasks.yaml` for task descriptions, expected outputs, and context.
+- `crews/schedule_crew/config/{classify,extraction}_agents.yaml` for agent
+  role, goal, and backstory (one file per crew -- see item 6 in "Next
+  Steps" for why they can't be shared).
+- `crews/schedule_crew/config/{classify,extraction}_tasks.yaml` for task
+  descriptions, expected outputs, and context.
 - `crews/schedule_crew/crew.py` for `@CrewBase`, `@agent`, `@task`, and `@crew` decorators.
 - `crews/schedule_crew/guardrails/guardrails.py` for task output validation.
 

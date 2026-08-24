@@ -80,30 +80,3 @@ classify_email:
     A single lowercase label: schedule, coverage_request, availability_request,
     timesheet, or other.
   agent: inbox_intelligence_agent
-
-extract_schedule:
-  description: >
-    Extract all interpretation schedule rows from this email.
-
-    Email:
-    {email}
-
-    Return strict JSON records with date, start_time, end_time, language, title,
-    and source. Use ISO date format YYYY-MM-DD and 24-hour HH:MM times.
-  expected_output: >
-    A JSON array of schedule event objects. Each object must include date,
-    start_time, end_time, language, title, and source.
-  agent: schedule_parser_agent
-  async_execution: true
-
-validate_schedule:
-  description: >
-    Validate the schedule records extracted by the previous task. Check for
-    missing required fields, invalid time ranges, duplicate events,
-    unsupported languages, and anything that should require human approval.
-  expected_output: >
-    A JSON object with fields: valid, errors, approval_required, and summary.
-  agent: schedule_validator_agent
-  context:
-    - extract_schedule
-

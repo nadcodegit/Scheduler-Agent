@@ -78,11 +78,21 @@ class ClassifyEmailCrew:
     already known to be a schedule email, instead of on every email
     regardless of type -- their output was being discarded for anything
     that wasn't `schedule` anyway.
+
+    Deliberately its own config files, not shared with ScheduleExtractionCrew:
+    crewai's CrewBase resolves every task entry in tasks_config against this
+    class's own @agent methods regardless of which tasks are actually
+    decorated with @task here, so a shared tasks.yaml containing
+    extract_schedule's `agent: schedule_parser_agent` reference raises
+    KeyError the moment this crew is instantiated, since this class has no
+    schedule_parser_agent. Confirmed the hard way: this crashed on every
+    single classification, silently caught by scheduler_flow.py's
+    except-and-fall-back-to-regex handler, so it looked like it was working.
     """
 
     base_dir = Path(__file__).parent
-    agents_config = str(base_dir / "config" / "agents.yaml")
-    tasks_config = str(base_dir / "config" / "tasks.yaml")
+    agents_config = str(base_dir / "config" / "classify_agents.yaml")
+    tasks_config = str(base_dir / "config" / "classify_tasks.yaml")
 
     # crewai's built-in agent/crew memory (memory=True) needs its own LLM for
     # memory analysis and defaults to OpenAI if none is configured, which
@@ -118,12 +128,14 @@ class ClassifyEmailCrew:
 @CrewBase
 class ScheduleExtractionCrew:
     """Extraction + validation -- only ever kicked off once ClassifyEmailCrew
-    has already said this email is a schedule email.
+    has already said this email is a schedule email. See ClassifyEmailCrew's
+    docstring for why this needs its own config files rather than sharing
+    ClassifyEmailCrew's.
     """
 
     base_dir = Path(__file__).parent
-    agents_config = str(base_dir / "config" / "agents.yaml")
-    tasks_config = str(base_dir / "config" / "tasks.yaml")
+    agents_config = str(base_dir / "config" / "extraction_agents.yaml")
+    tasks_config = str(base_dir / "config" / "extraction_tasks.yaml")
 
     @agent
     def schedule_parser_agent(self) -> Agent:

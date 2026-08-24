@@ -234,6 +234,13 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         default_language = str(self.state.memory_snapshot.get("default_language", "Persian"))
         for event in self.state.extracted_events:
             event.language = default_language
+            # Defense in depth: extraction_tasks.yaml's extract_schedule no
+            # longer asks the model for a title, but if it sends one anyway
+            # (e.g. an empty string), that would otherwise silently override
+            # ScheduleEvent's own sensible default and produce a
+            # blank-titled calendar event.
+            if not event.title:
+                event.title = ScheduleEvent.model_fields["title"].default
 
         self.state.validation_errors = validate_schedule_events(self.state.extracted_events)
         self.state.approval_required = bool(self.state.validation_errors)
