@@ -13,6 +13,9 @@ outputs/approved_schedule.json
 # A real Purchase Order PDF downloaded from Gmail -- may contain real
 # personal/financial data, never a fixed demo artifact.
 outputs/downloaded_purchase_order.pdf
+# A real roster screenshot downloaded from Gmail -- contains real name/ID/
+# schedule data, never a fixed demo artifact.
+outputs/downloaded_roster_image.*
 # Gmail OAuth client secret and cached user token -- never commit real
 # credentials.
 credentials.json

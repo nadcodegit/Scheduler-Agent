@@ -6,6 +6,8 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+import litellm
+
 try:
     from crewai.flow.flow import Flow, listen, router, start
 except ImportError:  # pragma: no cover
@@ -57,6 +59,17 @@ from scheduler_agents.tools.timesheet_tool import (
     parse_purchase_order_text,
     read_purchase_order_pdf_text,
 )
+
+
+# Groq's free tier caps at a flat 8000 tokens/minute, shared org-wide across
+# every Groq call this project makes (classification/extraction here, plus
+# roster-vision extraction). evals/run_eval.py already retries this exact
+# error for the same reason; the live flow never had the same protection --
+# confirmed live: a real classify/extract call failed outright with
+# litellm.RateLimitError instead of falling back to regex, purely because
+# Groq's shared per-minute budget was already spent by other calls.
+_RATE_LIMIT_RETRY_DELAY_SECONDS = 20
+_RATE_LIMIT_MAX_ATTEMPTS = 4
 
 
 def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
@@ -172,17 +185,25 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         email = self._require_email()
 
         if llm_is_configured():
-            try:
-                await self._classify_and_extract_with_llm(email)
-                record_hook(
-                    self.state,
-                    "after_classify_email",
-                    email_type=self.state.email_type.value,
-                    mode="llm",
-                )
-                return self.state.email_type
-            except Exception as exc:  # LLM/network failures fall back, never crash the flow
-                record_hook(self.state, "llm_pipeline_failed", error=str(exc))
+            for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+                try:
+                    await self._classify_and_extract_with_llm(email)
+                    record_hook(
+                        self.state,
+                        "after_classify_email",
+                        email_type=self.state.email_type.value,
+                        mode="llm",
+                    )
+                    return self.state.email_type
+                except litellm.RateLimitError as exc:
+                    if attempt == _RATE_LIMIT_MAX_ATTEMPTS:
+                        record_hook(self.state, "llm_pipeline_failed", error=str(exc))
+                        break
+                    record_hook(self.state, "llm_pipeline_rate_limited", attempt=attempt)
+                    await asyncio.sleep(_RATE_LIMIT_RETRY_DELAY_SECONDS)
+                except Exception as exc:  # LLM/network failures fall back, never crash the flow
+                    record_hook(self.state, "llm_pipeline_failed", error=str(exc))
+                    break
 
         self._classify_with_regex(email)
         record_hook(self.state, "after_classify_email", email_type=self.state.email_type.value, mode="regex")

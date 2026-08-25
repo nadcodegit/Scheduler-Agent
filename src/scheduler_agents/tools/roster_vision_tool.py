@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ from scheduler_agents.tools.llm_json import strip_code_fence
 _VISION_MODEL_CANDIDATES: list[tuple[str, str]] = [
     ("GROQ_API_KEY", "groq/qwen/qwen3.6-27b"),
     ("OPENAI_API_KEY", "gpt-4o-mini"),
-    ("GEMINI_API_KEY", "gemini/gemini-2.0-flash"),
+    ("GEMINI_API_KEY", "gemini/gemini-3.6-flash"),
 ]
 
 # Abbreviations actually seen in roster column headers. Extend as new ones
@@ -42,6 +43,16 @@ _TIMEZONE_LABELS = {
     "GMT": "Europe/London",
     "BST": "Europe/London",
 }
+
+# A real base64-encoded roster screenshot plus this prompt reliably costs
+# several thousand tokens, and Groq's free tier caps at a flat 8000
+# tokens/minute (org-wide, shared with every other Groq call this project
+# makes) -- confirmed live: a real request was rejected outright
+# ("Requested 10284" against "Limit 8000"), not merely throttled. A single
+# retry after the window resets is enough in practice, same pattern
+# evals/run_eval.py already uses for the same rate limit on the text path.
+_RATE_LIMIT_RETRY_DELAY_SECONDS = 20
+_RATE_LIMIT_MAX_ATTEMPTS = 4
 
 def _build_prompt() -> str:
     # The model has no notion of "today" on its own and will otherwise guess
@@ -75,9 +86,16 @@ def resolve_timezone(label: str | None, default: str) -> str:
     return _TIMEZONE_LABELS.get(label.strip().upper(), default)
 
 
-def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str) -> dict[str, Any]:
+def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str, api_key: str) -> dict[str, Any]:
+    # api_key is passed explicitly rather than left for litellm to pick up
+    # from the GEMINI_API_KEY env var on its own -- verified live, those two
+    # paths are NOT equivalent for Gemini: relying on the env var routed
+    # litellm through a different internal auth flow (a Vertex-AI-style
+    # "beta" endpoint expecting an OAuth token) and failed with a 401 on a
+    # key that worked immediately once passed as this explicit parameter.
     kwargs: dict[str, Any] = {
         "model": model,
+        "api_key": api_key,
         "temperature": 0,
         # A real full month's roster (Persian interpretation is on a
         # near-daily cadence for this vendor) can run 40+ events -- without
@@ -131,12 +149,21 @@ def parse_roster_image(path: Path) -> tuple[list[ScheduleEvent], str | None]:
 
     data: dict[str, Any] | None = None
     last_error: Exception | None = None
-    for _env_var, model in configured:
-        try:
-            data = _call_vision_model(model, prompt, mime, image_b64)
+    for env_var, model in configured:
+        for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+            try:
+                data = _call_vision_model(model, prompt, mime, image_b64, api_key=os.getenv(env_var, ""))
+                break
+            except litellm.RateLimitError as exc:
+                last_error = exc
+                if attempt == _RATE_LIMIT_MAX_ATTEMPTS:
+                    break
+                time.sleep(_RATE_LIMIT_RETRY_DELAY_SECONDS)
+            except Exception as exc:  # try the next configured provider rather than giving up
+                last_error = exc
+                break
+        if data is not None:
             break
-        except Exception as exc:  # try the next configured provider rather than giving up
-            last_error = exc
 
     if data is None:
         raise RuntimeError(f"All configured vision providers failed; last error: {last_error}") from last_error
