@@ -111,6 +111,7 @@ def main() -> None:
 
     print(f"Saved calendar payloads: {output_paths['calendar_payloads']}")
     print(f"Saved flow state: {output_paths['flow_state']}")
+    print(f"Saved calendar file (.ics): {output_paths['ics']}")
 
 
 if __name__ == "__main__":

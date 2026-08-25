@@ -471,7 +471,16 @@ The run writes:
 ```text
 outputs/calendar_payloads.json
 outputs/flow_state.json
+outputs/schedule.ics
 ```
+
+`schedule.ics` is a standard iCalendar file built from whatever ended up in
+`calendar_events` -- V1's approved monthly schedule or V2's accepted
+coverage slots, whichever workflow actually ran (both already write into
+the same list). It opens directly in Outlook, Google Calendar, or Apple
+Calendar with a double-click and imports the events, with zero connection
+to a real calendar account or API -- same "local file only, human decides
+what happens to it" rule as every other output in this project.
 
 ## Test
 
