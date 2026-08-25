@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-87%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -47,13 +47,18 @@ flowchart TD
         ts1["parse_purchase_order_pdf()<br/>reads the PDF, not email body"] --> ts2["fill_invoice_template()"]
     end
 
-    img["📷 Roster screenshot<br/>(V5, vision LLM)"] -.->|body has no dates| sched1
-    pdf["📎 Purchase-order PDF"] -.-> ts1
+    img["📷 Roster screenshot<br/>(V5, live Gmail image or static fallback, vision LLM)"] -.->|body has no dates| sched1
+    pdf["📎 Purchase-order PDF<br/>(live Gmail or static fallback)"] -.-> ts1
 
-    sched3 --> out1["📅 calendar_events"]
-    cov3 --> out2["✉️ one combined reply draft<br/>+ calendar for accepted slots"]
+    sched3 --> out1["📅 calendar_events<br/>(shared list)"]
+    cov3 -.->|accepted| out1
+    cov3 --> out2["✉️ one combined reply draft"]
     avail2 --> out3["✉️ reply draft"]
     ts2 --> out4["📄 invoice .docx saved"]
+
+    subgraph V6["V6 · calendar file (V1 + V2 shared)"]
+        out1 --> ics["🗓️ schedule.ics<br/>(V6, double-click import --<br/>Outlook/Google/Apple)"]
+    end
 ```
 
 ## Milestones
@@ -207,7 +212,8 @@ reasoning. A roster screenshot has no parseable text, so there's no regex
 fallback possible here the way every other extraction path has one --
 instead, `parse_roster_image` tries each of several curated
 known-vision-capable models in priority order (Groq's `qwen/qwen3.6-27b`,
-then `gpt-4o-mini`, then Gemini's `gemini-2.0-flash`) until one succeeds,
+then `gpt-4o-mini`, then Gemini's `gemini-3.6-flash` -- Google retired
+`gemini-2.0-flash` since this was first written; see below) until one succeeds,
 skipping straight to the next configured candidate on failure. This is
 deliberately not the same `MODEL` env var every other LLM call in this
 project follows -- `MODEL` is usually chosen for classification/coverage
@@ -228,6 +234,63 @@ all as a result.
 roster screenshot -> vision LLM -> events + timezone label -> deterministic guardrail -> calendar (or blocked + approval)
 ```
 
+**Live Gmail image ingestion added later, with two real bugs found the same way every other bug in this project was found -- live testing.** `gmail_tool.py` originally only downloaded PDF attachments (V4); a real `schedule` email with the actual roster as an *embedded image* always silently fell through to the static demo fixture instead, producing the wrong month's data. Fixed by downloading the message's embedded image the same way, with two rounds of live verification:
+
+1. First attempt picked the *largest* embedded image (reasoning: a signature logo would be small). **Verified wrong against a real email**: the vendor's signature includes a photographic marketing banner that outweighs the actual roster screenshot (flat colors, far more compressible) by roughly 6x. Fixed to pick the *first* embedded image in MIME document order instead -- confirmed against the real message that the mail client (Outlook) places the body-referenced image before signature-block images every time.
+2. Separately, the real roster (42 events for a full month) was silently truncated mid-JSON by a missing `max_tokens` cap on the vision call -- invisible against every roster fixture already in this repo, since none has more than 5 events. Fixed with an explicit `max_tokens=8000` and a per-provider rate-limit retry (Groq's free tier is a flat 8000 tokens/minute, shared across every Groq call this project makes). Re-verified live: 42/42 events extracted correctly.
+
+The same rate-limit retry gap existed in the live flow's own `classify_email`/extraction path (`scheduler_flow.py`) -- `evals/run_eval.py` already retried Groq's rate limit, but the actual production flow didn't, so a real live run hit the limit and silently fell back to regex instead of retrying. Fixed with the identical retry pattern (4 attempts, 20s apart) in both places.
+
+Separately, a fresh `GEMINI_API_KEY` surfaced a real, non-obvious litellm behavior: relying on litellm's automatic env-var pickup for this key routed through a different internal auth path (a Vertex-AI-style endpoint expecting an OAuth token) and failed with a 401, while the *same* key passed as an explicit `api_key` parameter worked immediately. Fixed by always passing `api_key` explicitly per provider. Gemini's own API can still be intermittently flaky post-fix (401/503 alternating on identical requests, likely rollout instability on the newer `gemini-3.6-flash` model) -- Groq remains the reliable primary provider; Gemini is a bonus fallback.
+
+V6 adds a real, usable calendar output. Every workflow before this ended in
+either a draft reply (V2/V3, already human-readable) or a raw
+Google-Calendar-API-shaped JSON blob (`calendar_payloads.json`) that a
+human can't actually do anything with directly. [`ics_tool.py`](src/scheduler_agents/tools/ics_tool.py)
+turns whatever ended up in `SchedulerFlowState.calendar_events` -- V1's
+approved monthly schedule or V2's accepted coverage slots, whichever
+workflow actually ran, since both already write into that same shared
+list -- into `outputs/schedule.ics`, a standard iCalendar file that opens
+directly in Outlook, Google Calendar, or Apple Calendar with a
+double-click. Built with the `icalendar` library rather than hand-rolled
+ICS text, since the format has real interop gotchas (line folding at 75
+octets, mandatory CRLF line endings, TEXT-field escaping, VTIMEZONE
+blocks) that are easy to get subtly wrong. Still zero real calendar
+integration -- no API, no OAuth, nothing sent anywhere -- same rule as
+every other output in this project.
+
+```text
+calendar_events (V1 or V2) -> build_ics_calendar() -> outputs/schedule.ics (double-click import, never auto-connected to a real calendar)
+```
+
+Two real bugs surfaced by actually opening the generated file, not by
+inspecting it as text:
+
+1. The first version omitted `UID` and `DTSTAMP` on every event -- both
+   REQUIRED by RFC 5545. Google/Apple Calendar tolerated the omission;
+   Outlook, the client this feature was specifically built for, is
+   historically stricter about it. Fixed by adding both -- `UID` is a
+   deterministic hash of the event's own content (date/time/summary)
+   rather than a random `uuid4`, so regenerating this file from the same
+   source data twice produces the same `UID` and reimporting updates
+   rather than duplicates.
+2. The user opened the file in her real Outlook and every event showed an
+   hour earlier than the file's own `DTSTART`. Root cause: `icalendar`'s
+   `Calendar.add_missing_timezones()` scans the full 1970-2038 tzdata
+   range by default, which pulled Armenia's real but long-obsolete
+   pre-2012 DST rules for `Asia/Yerevan` (a fixed +04:00 with no DST
+   since) into the VTIMEZONE block -- Outlook applied that stale rule
+   anyway and shifted every event. Fixed at the root, not with a
+   Yerevan-specific special case: narrowed the scanned date range to
+   roughly the window this file's events could plausibly fall in (1 year
+   back, 2 years forward) via `icalendar.Timezone.from_tzid`'s
+   `first_date`/`last_date` params. A zone with no DST currently in effect
+   now resolves to one simple fixed-offset rule instead of a stale
+   historical table, while a zone that genuinely still observes DST
+   (`Europe/London`, used for roster events) still gets a correct
+   STANDARD/DAYLIGHT pair -- verified both directly, then re-verified by
+   the user re-opening the fixed file in her actual Outlook.
+
 The project is intentionally designed with:
 
 - CrewAI Flow orchestration
@@ -247,6 +310,11 @@ scheduler-agents/
 ├── pyproject.toml
 ├── .env.example
 ├── README.md
+├── outputs/            (generated at runtime; calendar_payloads.json,
+│                        flow_state.json, schedule.ics are committed as
+│                        demo artifacts, approved_schedule.json and any
+│                        live-downloaded PDF/image are gitignored -- may
+│                        contain real personal data)
 ├── evals/
 │   └── run_eval.py
 ├── sample_data/
@@ -271,6 +339,7 @@ scheduler-agents/
 ├── src/
 │   └── scheduler_agents/
 │       ├── main.py
+│       ├── output_writer.py
 │       ├── crews/
 │       │   └── schedule_crew/
 │       │       ├── crew.py
@@ -296,6 +365,7 @@ scheduler-agents/
 │           ├── calendar_tool.py
 │           ├── coverage_tool.py
 │           ├── gmail_tool.py
+│           ├── ics_tool.py
 │           ├── invoice_tool.py
 │           ├── llm_json.py
 │           ├── roster_vision_tool.py
@@ -310,6 +380,7 @@ scheduler-agents/
     ├── test_timesheet_workflow.py
     ├── test_roster_vision_workflow.py
     ├── test_gmail_workflow.py
+    ├── test_ics_tool.py
     ├── test_schedule_store.py
     └── test_llm_json.py
 ```
@@ -633,6 +704,47 @@ backfill in `validate_schedule` in case a model sends one anyway.
     Verified live against a real roster email that previously tripped
     "Missing language" on every one of 5 rows -- now 0 validation errors,
     5/5 calendar payloads created, each correctly showing "Language: Persian".
+11. ~~Live Gmail ingestion only downloads PDF attachments, never roster
+    images~~ -- done: `gmail_tool.py` now downloads the message's first
+    embedded image (in MIME document order) the same way it already
+    downloaded PDFs, and `parse_schedule` prefers it over the static
+    demo fallback. Two real bugs found and fixed getting here -- picking
+    the *largest* embedded image instead of the first one (a marketing
+    banner in the vendor's signature outweighs the actual roster
+    screenshot), and a missing `max_tokens` cap silently truncating a
+    real 42-event roster's JSON mid-array. See "Milestones" (V5) above
+    for the full story, including exact numbers from live verification.
+12. ~~The live classify/extract flow has no retry on Groq's rate
+    limit~~ -- done: `evals/run_eval.py` already retried
+    `litellm.RateLimitError`, but `scheduler_flow.py`'s own
+    `classify_email` didn't, and a real live run hit this and silently
+    fell back to regex instead of retrying. Fixed with the identical
+    retry pattern (4 attempts, 20s apart) in both `classify_email` and
+    the roster-vision call.
+13. ~~Gemini vision fallback stopped working~~ -- done, in two parts:
+    `gemini-2.0-flash` was retired by Google (`gemini-3.6-flash` is the
+    replacement, named in Google's own 404 response), and relying on
+    litellm's automatic `GEMINI_API_KEY` env-var pickup silently routed
+    through a different, OAuth-expecting internal auth path than passing
+    `api_key` explicitly -- only the explicit form worked against a real
+    key. Gemini's own API can still be intermittently flaky post-fix
+    (401/503 alternating on identical requests); Groq remains the
+    reliable primary provider regardless.
+14. ~~Eval suite has no coverage for the vision path or today's new
+    false-positive~~ -- done: `evals/run_eval.py` gained
+    `Case.kind="vision"` (calls `parse_roster_image` directly against a
+    synthetic 46-event roster screenshot, guarding the `max_tokens`
+    truncation bug above -- every roster fixture already in this repo
+    had only 5 events, too small to ever have caught it) and a new
+    `other` case for a real "reacted to your message" notification on an
+    already-answered thread, fetched live and correctly classified.
+    14 cases total now, both new fixtures fully synthetic/sanitized.
+15. ~~`calendar_payloads.json` is a raw JSON blob, not something a human
+    can actually use~~ -- done: see "Milestones" (V6) above for
+    `outputs/schedule.ics` and the two real Outlook-specific bugs
+    (missing UID/DTSTAMP; a stale historical DST rule in the
+    auto-generated VTIMEZONE block) found by actually opening the file
+    in the target app rather than just inspecting it as text.
 
 ## Course-Style CrewAI Pieces
 
