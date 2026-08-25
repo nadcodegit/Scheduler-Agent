@@ -1,23 +1,122 @@
 {
-  "run_id": "19baa3f2-c60d-4a01-abca-4fb600d6d3de",
+  "run_id": "88a82066-39bd-4fb4-8880-cbe0fc97ab62",
   "email": {
-    "subject": "Coverage needed in April",
+    "subject": "Your September schedule is ready",
     "sender": "scheduler@example.com",
-    "body": "Dear interpreters,\n\nwe would need your help to cover below hours in April. Please let me know if you could help to cover some hours.\n\n* Monday-Wednesday: 11 am - 1 pm UK time\n\nPlease let me know if you would like to cover only specific dates or half an hour. Any help is highly appreciated!\n\nAdditionally, we have below availability for specific dates, all in UK time:\n\n* April 8: 3-4 pm\n* April 9: 10 am -12 pm and 1-2 pm\n* April 21: 10-11 am\n* April 23: 12-1 pm\n* April 29, 30: 10-11 am\n\nThank you and best regards,",
-    "attachments": []
+    "body": "Hello,\n\nPlease find your interpretation schedule for September below:\n\nSep 1, 2026, 09:00-12:00, English\nSep 2, 2026, 13:00-17:00, English\nSep 4, 2026, 10:00-14:00, Turkish\n\nBest,\nScheduler",
+    "attachments": [],
+    "sent_date": null,
+    "roster_image_path": null
   },
-  "email_type": "coverage_request",
-  "extracted_events": [],
+  "email_type": "schedule",
+  "extracted_events": [
+    {
+      "date": "2026-09-01",
+      "start_time": "09:00:00",
+      "end_time": "12:00:00",
+      "language": "Persian",
+      "source": "email",
+      "title": "Interpretation Session"
+    },
+    {
+      "date": "2026-09-02",
+      "start_time": "13:00:00",
+      "end_time": "17:00:00",
+      "language": "Persian",
+      "source": "email",
+      "title": "Interpretation Session"
+    },
+    {
+      "date": "2026-09-04",
+      "start_time": "10:00:00",
+      "end_time": "14:00:00",
+      "language": "Persian",
+      "source": "email",
+      "title": "Interpretation Session"
+    }
+  ],
   "validation_errors": [],
   "approval_required": false,
-  "calendar_events": [],
+  "calendar_events": [
+    {
+      "summary": "Interpretation Session",
+      "description": "Language: Persian",
+      "start": {
+        "dateTime": "2026-09-01T09:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-01T12:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    },
+    {
+      "summary": "Interpretation Session",
+      "description": "Language: Persian",
+      "start": {
+        "dateTime": "2026-09-02T13:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-02T17:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    },
+    {
+      "summary": "Interpretation Session",
+      "description": "Language: Persian",
+      "start": {
+        "dateTime": "2026-09-04T10:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "end": {
+        "dateTime": "2026-09-04T14:00:00",
+        "timeZone": "Asia/Yerevan"
+      },
+      "reminders": {
+        "useDefault": false,
+        "overrides": [
+          {
+            "method": "popup",
+            "minutes": 30
+          },
+          {
+            "method": "email",
+            "minutes": 120
+          }
+        ]
+      }
+    }
+  ],
   "memory_snapshot": {
     "timezone": "Asia/Yerevan",
-    "languages": [
-      "English",
-      "Turkish",
-      "Persian"
-    ],
+    "default_language": "Persian",
     "scheduler_email": "scheduler@example.com",
     "calendar_name": "Work",
     "vendor_id": "000000"
@@ -28,10 +127,15 @@
       "details": {}
     },
     {
+      "name": "gmail_fetch_found_nothing",
+      "details": {}
+    },
+    {
       "name": "after_receive_email",
       "details": {
-        "subject": "Coverage needed in April",
-        "sender": "scheduler@example.com"
+        "subject": "Your September schedule is ready",
+        "sender": "scheduler@example.com",
+        "source": "sample"
       }
     },
     {
@@ -39,39 +143,56 @@
       "details": {}
     },
     {
-      "name": "llm_pipeline_failed",
-      "details": {
-        "error": "litellm.RateLimitError: RateLimitError: GroqException - {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01m0g6g4kmetqv0r2kstmpa1dk` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5650, Requested 2701. Please try again in 2.6325s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
-      }
-    },
-    {
       "name": "after_classify_email",
       "details": {
-        "email_type": "coverage_request",
-        "mode": "regex"
+        "email_type": "schedule",
+        "mode": "llm"
       }
     },
     {
-      "name": "before_handle_coverage_request",
+      "name": "before_parse_schedule",
       "details": {}
     },
     {
-      "name": "coverage_llm_extraction_failed",
+      "name": "parse_schedule_skipped",
       "details": {
-        "error": "litellm.RateLimitError: RateLimitError: GroqException - {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01m0g6g4kmetqv0r2kstmpa1dk` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5629, Requested 2538. Please try again in 1.2525s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing\",\"type\":\"tokens\",\"code\":\"rate_limit_exceeded\"}}\n"
+        "reason": "already_extracted_by_llm"
       }
     },
     {
-      "name": "coverage_request_unparseable",
+      "name": "before_validate_schedule",
       "details": {}
+    },
+    {
+      "name": "after_validate_schedule",
+      "details": {
+        "error_count": 0,
+        "approval_required": false
+      }
+    },
+    {
+      "name": "before_create_calendar_events",
+      "details": {}
+    },
+    {
+      "name": "approved_schedule_saved",
+      "details": {
+        "event_count": 3
+      }
+    },
+    {
+      "name": "after_create_calendar_events",
+      "details": {
+        "event_count": 3
+      }
     }
   ],
-  "used_llm": false,
+  "used_llm": true,
   "roster_timezone_label": null,
   "coverage_slots": [],
   "coverage_decisions": [],
   "coverage_reply_draft": null,
-  "coverage_approval_required": true,
+  "coverage_approval_required": false,
   "coverage_unstructured_note": null,
   "availability_period": null,
   "availability_statement": null,
@@ -80,5 +201,7 @@
   "timesheet_data": null,
   "invoice_output_path": null,
   "timesheet_approval_required": false,
-  "id": "8a5aea97-6755-414c-bd10-d05a6489e12e"
+  "live_pdf_attachment_path": null,
+  "live_roster_image_path": null,
+  "id": "0aeb5549-e00b-4063-8f5f-1a35b6883974"
 }

@@ -79,6 +79,15 @@ def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str) -> di
     kwargs: dict[str, Any] = {
         "model": model,
         "temperature": 0,
+        # A real full month's roster (Persian interpretation is on a
+        # near-daily cadence for this vendor) can run 40+ events -- without
+        # an explicit cap, the default max token limit truncates the JSON
+        # mid-array on a real roster (verified live: cut off at char 4019,
+        # finish_reason "length") even though it never showed up against the
+        # small 5-event demo fixture used for earlier testing. High enough
+        # to comfortably cover a full month, still a hard ceiling against a
+        # runaway response.
+        "max_tokens": 8000,
         "messages": [
             {
                 "role": "user",

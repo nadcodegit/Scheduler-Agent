@@ -27,6 +27,11 @@ class EmailInput(BaseModel):
     # can be days apart. None when the source has no such header; callers
     # fall back to date.today().
     sent_date: date | None = None
+    # Local path of the largest embedded image on this message, when live
+    # Gmail fetch found and saved one (the real monthly roster always
+    # arrives as an image, never text or a PDF). None means no image was
+    # found on this message, not "check the file".
+    roster_image_path: str | None = None
 
 
 class TimeSlot(BaseModel):
@@ -131,4 +136,11 @@ class SchedulerFlowState(BaseModel):
     # that distinction matters so a stale downloaded file from a previous
     # run is never silently reused).
     live_pdf_attachment_path: str | None = None
+
+    # Set by receive_email() when live Gmail found an embedded image on the
+    # fetched message and saved it locally -- parse_schedule() prefers this
+    # over the static roster_image_path fallback when set. None means no
+    # live image was found this run (not "use the local sample" -- same
+    # stale-file distinction as live_pdf_attachment_path above).
+    live_roster_image_path: str | None = None
 

@@ -126,7 +126,13 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         if is_live_gmail_enabled():
             try:
                 pdf_save_path = self.invoice_output_dir / "downloaded_purchase_order.pdf" if self.invoice_output_dir else None
-                email = fetch_latest_email(save_pdf_attachment_to=pdf_save_path)
+                roster_image_save_path = (
+                    self.invoice_output_dir / "downloaded_roster_image.png" if self.invoice_output_dir else None
+                )
+                email = fetch_latest_email(
+                    save_pdf_attachment_to=pdf_save_path,
+                    save_roster_image_to=roster_image_save_path,
+                )
                 if email is not None:
                     self.state.email = email
                     self.state.memory_snapshot = self.memory.snapshot()
@@ -137,6 +143,13 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                         # previous run must never be silently reused.
                         self.state.live_pdf_attachment_path = str(pdf_save_path)
                         record_hook(self.state, "gmail_pdf_attachment_saved", filename=email.attachments[0])
+                    if email.roster_image_path:
+                        # Same "found this run, not a stale file" rule as the PDF
+                        # case above -- the real roster always arrives as an image,
+                        # never text or a PDF, so this is what parse_schedule's
+                        # vision fallback should actually read.
+                        self.state.live_roster_image_path = email.roster_image_path
+                        record_hook(self.state, "gmail_roster_image_saved", path=email.roster_image_path)
                     record_hook(
                         self.state, "after_receive_email", subject=email.subject, sender=email.sender, source="gmail"
                     )
@@ -198,9 +211,15 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         email = self._require_email()
         events = parse_schedule_text(email.body)
 
-        if not events and self.roster_image_path and self.roster_image_path.exists():
+        # Prefer the image live Gmail actually downloaded off this message
+        # over the static local sample -- same "live data wins when we have
+        # it" rule handle_timesheet() already applies to the PDF path.
+        roster_image_path = (
+            Path(self.state.live_roster_image_path) if self.state.live_roster_image_path else self.roster_image_path
+        )
+        if not events and roster_image_path and roster_image_path.exists():
             try:
-                events, timezone_label = parse_roster_image(self.roster_image_path)
+                events, timezone_label = parse_roster_image(roster_image_path)
                 self.state.roster_timezone_label = timezone_label
                 record_hook(
                     self.state,

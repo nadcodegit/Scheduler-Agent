@@ -70,7 +70,11 @@ def _get_service():
     return build("gmail", "v1", credentials=_get_credentials())
 
 
-def fetch_latest_email(query: str | None = None, save_pdf_attachment_to: Path | None = None) -> EmailInput | None:
+def fetch_latest_email(
+    query: str | None = None,
+    save_pdf_attachment_to: Path | None = None,
+    save_roster_image_to: Path | None = None,
+) -> EmailInput | None:
     """Fetches the single most recent message matching `query` (default:
     the GMAIL_QUERY env var, or a Glocco-only default covering both of
     their real sending domains -- this project automates one real vendor
@@ -87,6 +91,17 @@ def fetch_latest_email(query: str | None = None, save_pdf_attachment_to: Path | 
     populated with its filename as the caller's signal that a save
     happened -- an empty list means no PDF was found, not "check the file",
     since a stale file from a previous run may still exist on disk.
+
+    When `save_roster_image_to` is given and the message has an embedded
+    image (the real monthly roster always arrives as a screenshot, never
+    text or a PDF), the *first* one in document order is downloaded and
+    written there -- see `_find_first_image_part` for why document order,
+    not size, is the reliable signal for which embedded image is actually
+    the roster. The saved file's extension matches the image's real
+    mimeType, since roster_vision_tool relies on it to pick the right
+    content-type when calling a vision model. `EmailInput.roster_image_path`
+    is set to the actual saved path (not just a filename) as the caller's
+    signal that a save happened -- None means no image was found this run.
     """
 
     # Glocco uses two real sending domains: glocco.com for scheduling/
@@ -122,12 +137,24 @@ def fetch_latest_email(query: str | None = None, save_pdf_attachment_to: Path | 
             save_pdf_attachment_to.write_bytes(pdf_bytes)
             attachments = [pdf_part.get("filename") or save_pdf_attachment_to.name]
 
+    roster_image_path: str | None = None
+    if save_roster_image_to is not None:
+        image_part = _find_first_image_part(payload)
+        if image_part is not None:
+            image_bytes = _fetch_attachment_bytes(service, message_id, image_part)
+            extension = _extension_for_mime_type(image_part.get("mimeType", ""))
+            actual_path = save_roster_image_to.with_suffix(extension)
+            actual_path.parent.mkdir(parents=True, exist_ok=True)
+            actual_path.write_bytes(image_bytes)
+            roster_image_path = str(actual_path)
+
     return EmailInput(
         subject=headers.get("subject", ""),
         sender=headers.get("from", ""),
         body=_extract_plain_text_body(payload),
         attachments=attachments,
         sent_date=sent_date,
+        roster_image_path=roster_image_path,
     )
 
 
@@ -174,6 +201,46 @@ def _find_first_pdf_part(payload: dict[str, Any]) -> dict[str, Any] | None:
             return found
 
     return None
+
+
+def _find_first_image_part(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Walks a Gmail message payload's MIME tree for the first part whose
+    mimeType starts with "image/" -- both inline (cid-referenced) and
+    regular attachments show up this way in the API's payload structure,
+    regardless of how they're displayed in a mail client.
+
+    A real roster email carries more than one image -- the roster
+    screenshot itself plus signature images (a favicon, a LinkedIn banner
+    used as a footer). Picking by byte size was tried and verified wrong
+    against a real message: a photographic marketing banner ("Respect the
+    Locals") outweighed the actual roster screenshot (flat colors, much
+    more compressible) by 6x despite being irrelevant. Document order is
+    the real signal instead -- Outlook places the content image the sender
+    actually referenced ("...your September roster, kindly see it
+    below:") before the signature block's images, confirmed against a real
+    message where image001.png (first) was the roster, and
+    image002.png/image003.jpg (signature logo + banner) came after.
+    """
+
+    if (payload.get("mimeType") or "").startswith("image/"):
+        return payload
+
+    for part in payload.get("parts", []) or []:
+        found = _find_first_image_part(part)
+        if found is not None:
+            return found
+
+    return None
+
+
+def _extension_for_mime_type(mime_type: str) -> str:
+    return {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+    }.get(mime_type.lower(), ".png")
 
 
 def _fetch_attachment_bytes(service, message_id: str, part: dict[str, Any]) -> bytes:

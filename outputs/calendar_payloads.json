@@ -1,1 +1,77 @@
-[]
+[
+  {
+    "summary": "Interpretation Session",
+    "description": "Language: Persian",
+    "start": {
+      "dateTime": "2026-09-01T09:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "end": {
+      "dateTime": "2026-09-01T12:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "reminders": {
+      "useDefault": false,
+      "overrides": [
+        {
+          "method": "popup",
+          "minutes": 30
+        },
+        {
+          "method": "email",
+          "minutes": 120
+        }
+      ]
+    }
+  },
+  {
+    "summary": "Interpretation Session",
+    "description": "Language: Persian",
+    "start": {
+      "dateTime": "2026-09-02T13:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "end": {
+      "dateTime": "2026-09-02T17:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "reminders": {
+      "useDefault": false,
+      "overrides": [
+        {
+          "method": "popup",
+          "minutes": 30
+        },
+        {
+          "method": "email",
+          "minutes": 120
+        }
+      ]
+    }
+  },
+  {
+    "summary": "Interpretation Session",
+    "description": "Language: Persian",
+    "start": {
+      "dateTime": "2026-09-04T10:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "end": {
+      "dateTime": "2026-09-04T14:00:00",
+      "timeZone": "Asia/Yerevan"
+    },
+    "reminders": {
+      "useDefault": false,
+      "overrides": [
+        {
+          "method": "popup",
+          "minutes": 30
+        },
+        {
+          "method": "email",
+          "minutes": 120
+        }
+      ]
+    }
+  }
+]
