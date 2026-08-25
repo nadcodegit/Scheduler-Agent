@@ -6,7 +6,11 @@ strips MODEL/API key env vars, since the offline suite must stay free and
 network-free (see README.md's "Two run modes"). This script is the
 opposite: it needs a real MODEL/API key configured and makes real LLM
 calls, one classify_email call per case (plus one extraction call for each
-case expected to be a schedule email).
+case expected to be a schedule email). A separate handful of cases
+(Case.kind="vision") instead call parse_roster_image directly against a
+sample_data/*.png roster screenshot -- a real, independent code path with
+its own real failure modes (see the truncation case below), needing a
+vision-capable key (GROQ_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY).
 
 Run manually, e.g. after changing classify_email's prompt in
 crews/schedule_crew/config/tasks.yaml, to check nothing regressed across
@@ -33,6 +37,7 @@ from pathlib import Path
 import litellm
 
 from scheduler_agents.crews.schedule_crew.crew import run_llm_pipeline
+from scheduler_agents.tools.roster_vision_tool import parse_roster_image
 
 SAMPLE_DATA = Path(__file__).resolve().parents[1] / "sample_data"
 
@@ -52,6 +57,12 @@ class Case:
     expected_type: str
     # Only meaningful for expected_type == "schedule"; None means "don't check".
     expected_event_count: int | None = None
+    # "text": classify+extract a sample_data/*.txt email via run_llm_pipeline
+    # (the default, every case below until the vision one). "vision": parse
+    # a sample_data/*.png roster screenshot via parse_roster_image instead --
+    # a completely different code path with its own real failure modes
+    # (see roster_full_month_no_truncation below).
+    kind: str = "text"
 
 
 CASES: list[Case] = [
@@ -77,6 +88,22 @@ CASES: list[Case] = [
     Case("compliance_deadline", "sample_other_compliance_deadline_email.txt", "other", expected_event_count=0),
     Case("shift_removal_confirmation", "sample_other_shift_removal_confirmation_email.txt", "other", expected_event_count=0),
     Case("shift_reinstated_confirmation", "sample_other_shift_reinstated_confirmation_email.txt", "other", expected_event_count=0),
+    # A real "reacted to your message" notification on an already-answered
+    # availability thread was fetched live from Gmail and correctly
+    # classified `other` -- added here so a future prompt change can't
+    # silently regress it back to a false positive (the full quoted thread
+    # underneath, including the original scheduler request, makes this an
+    # easy case to mis-classify as a genuine new request).
+    Case("reaction_notification", "sample_other_reaction_notification_email.txt", "other", expected_event_count=0),
+    # -- Vision path (parse_roster_image, not run_llm_pipeline): a real
+    # 42-event full-month roster was silently truncated mid-JSON by a
+    # missing max_tokens cap (see roster_vision_tool.py) -- every roster
+    # fixture already in this repo has only 5 events, small enough to never
+    # have hit that limit regardless. This synthetic 46-event roster is
+    # deliberately past the real failure's size to actually catch a
+    # regression if the cap is ever lowered or removed. Needs a
+    # vision-capable key (GROQ_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY).
+    Case("roster_full_month_no_truncation", "sample_roster_full_month.png", "schedule", expected_event_count=46, kind="vision"),
 ]
 
 
@@ -91,7 +118,26 @@ async def _run_pipeline_with_rate_limit_retry(email_text: str):
             await asyncio.sleep(_RATE_LIMIT_RETRY_DELAY_SECONDS)
 
 
+async def run_vision_case(case: Case) -> tuple[bool, str]:
+    # parse_roster_image already retries rate limits internally (added
+    # alongside the max_tokens fix this case guards) -- no outer retry
+    # wrapper needed here, unlike the text path above.
+    path = SAMPLE_DATA / case.sample_file
+    try:
+        events, _timezone_label = await asyncio.to_thread(parse_roster_image, path)
+    except Exception as exc:  # noqa: BLE001 - report any failure as a failing case, don't crash the whole run
+        return False, f"ERROR: {exc}"
+
+    if case.expected_event_count is not None and len(events) != case.expected_event_count:
+        return False, f"expected {case.expected_event_count} event(s), got {len(events)}"
+
+    return True, "ok"
+
+
 async def run_case(case: Case) -> tuple[bool, str]:
+    if case.kind == "vision":
+        return await run_vision_case(case)
+
     email_text = (SAMPLE_DATA / case.sample_file).read_text(encoding="utf-8")
     try:
         result = await _run_pipeline_with_rate_limit_retry(email_text)

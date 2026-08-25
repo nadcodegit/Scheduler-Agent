@@ -260,11 +260,13 @@ scheduler-agents/
 │   ├── sample_purchase_order.pdf
 │   ├── sample_roster_email.txt
 │   ├── sample_roster.png
+│   ├── sample_roster_full_month.png
 │   ├── sample_approved_schedule.json
 │   ├── sample_other_attendance_complaint_email.txt
 │   ├── sample_other_compliance_deadline_email.txt
 │   ├── sample_other_shift_removal_confirmation_email.txt
 │   ├── sample_other_shift_reinstated_confirmation_email.txt
+│   ├── sample_other_reaction_notification_email.txt
 │   └── invoice_template.docx
 ├── src/
 │   └── scheduler_agents/
@@ -493,16 +495,25 @@ real `MODEL`/API key:
 uv run python evals/run_eval.py
 ```
 
-It classifies (and, for the `schedule` cases, extracts) 12 real sample
-emails and asserts each against a known-correct expected result: the right
-`email_type` label, and for the four real vendor false-positives
+It classifies (and, for the `schedule` cases, extracts) 13 real/realistic
+sample emails and asserts each against a known-correct expected result: the
+right `email_type` label, and for the five real vendor false-positives
 `classify_email`'s prompt was hardened against this session (a complaint
 about a past shift, a compliance deadline, a shift-removal confirmation,
-a shift-reinstatement confirmation), that zero events get extracted -- not
-just the right label, but no side effect either. Retries once on
+a shift-reinstatement confirmation, a "reacted to your message" notification
+on an already-answered thread), that zero events get extracted -- not
+just the right label, but no side effect either. Retries on
 `litellm.RateLimitError` with a fixed backoff, since Groq's free tier caps
 at 8000 tokens/minute and running every case back-to-back reliably exceeds
 it partway through.
+
+A separate vision case (`roster_full_month_no_truncation`) calls
+`parse_roster_image` directly against a synthetic 46-event roster
+screenshot (`sample_data/sample_roster_full_month.png`) instead of going
+through `run_llm_pipeline` -- this guards a real, independent bug found
+live this session: a missing `max_tokens` cap silently truncated a real
+42-event roster's JSON mid-array, and every roster fixture already in this
+repo has only 5 events, too small to ever have caught it.
 
 This isn't a formality: on its first real run, it immediately caught the
 item-6 regression described above (`ClassifyEmailCrew` crashing with
