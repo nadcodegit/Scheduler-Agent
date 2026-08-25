@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from icalendar import Alarm, Calendar, Event
+from icalendar import Alarm, Calendar, Event, Timezone
+
+# icalendar's own calendar.add_missing_timezones() scans the full
+# 1970-2038 tzdata range by default -- verified live, that pulls in
+# Armenia's real but long-obsolete pre-2012 DST rules for Asia/Yerevan
+# (fixed +04:00 with no DST since then) into the VTIMEZONE block, which
+# Outlook then misreads and applies anyway, shifting every event an hour
+# off. Narrowing the scanned range to roughly "the events this file could
+# plausibly contain" fixes this at the root for any zone whose DST policy
+# has changed, not just Yerevan: a zone with no current DST resolves to
+# one simple fixed-offset rule instead of a stale historical table, while
+# a zone that still genuinely observes DST (e.g. Europe/London) still gets
+# a correct STANDARD/DAYLIGHT pair.
+_TZ_WINDOW_PAST = timedelta(days=365)
+_TZ_WINDOW_FUTURE = timedelta(days=365 * 2)
 
 
 def build_ics_calendar(calendar_events: list[dict[str, Any]]) -> bytes:
@@ -28,7 +42,12 @@ def build_ics_calendar(calendar_events: list[dict[str, Any]]) -> bytes:
     calendar.add("prodid", "-//Scheduler Agents//scheduler-agents//EN")
     calendar.add("version", "2.0")
 
+    used_timezones: set[str] = set()
+    events: list[Event] = []
+
     for payload in calendar_events:
+        used_timezones.add(payload["start"]["timeZone"])
+        used_timezones.add(payload["end"]["timeZone"])
         event = Event()
         event.add("summary", payload["summary"])
         event.add("description", payload["description"])
@@ -57,12 +76,23 @@ def build_ics_calendar(calendar_events: list[dict[str, Any]]) -> bytes:
             alarm.add("trigger", -_minutes(override["minutes"]))
             event.add_component(alarm)
 
+        events.append(event)
+
+    # VTIMEZONE components conventionally precede the VEVENTs that
+    # reference them, so these are added to the calendar first.
+    today = date.today()
+    for tz_name in sorted(used_timezones):
+        calendar.add_component(
+            Timezone.from_tzid(
+                tz_name,
+                first_date=today - _TZ_WINDOW_PAST,
+                last_date=today + _TZ_WINDOW_FUTURE,
+            )
+        )
+
+    for event in events:
         calendar.add_component(event)
 
-    # Outlook in particular is stricter than Google/Apple Calendar about
-    # expecting a VTIMEZONE block for any TZID it sees rather than just
-    # trusting the IANA zone name -- this embeds one per zone actually used.
-    calendar.add_missing_timezones()
     return calendar.to_ical()
 
 
