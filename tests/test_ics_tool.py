@@ -49,3 +49,25 @@ def test_build_ics_calendar_adds_a_popup_alarm_not_an_email_one():
 def test_build_ics_calendar_with_no_events_is_still_a_valid_empty_calendar():
     parsed = Calendar.from_ical(build_ics_calendar([]))
     assert list(parsed.walk("VEVENT")) == []
+
+
+def test_build_ics_calendar_sets_required_uid_and_dtstamp():
+    # RFC 5545 requires both on every VEVENT; missing them is exactly the
+    # kind of thing a stricter client (Outlook) can reject on import even
+    # though a more lenient one (Google/Apple Calendar) tolerates it.
+    parsed = Calendar.from_ical(build_ics_calendar([_payload("2026-09-10", "14:00", "16:00")]))
+    event = list(parsed.walk("VEVENT"))[0]
+
+    assert str(event["uid"])
+    assert event["dtstamp"] is not None
+
+
+def test_build_ics_calendar_uid_is_stable_across_regeneration():
+    payload = _payload("2026-09-10", "14:00", "16:00")
+
+    first = Calendar.from_ical(build_ics_calendar([payload]))
+    second = Calendar.from_ical(build_ics_calendar([payload]))
+
+    first_uid = str(list(first.walk("VEVENT"))[0]["uid"])
+    second_uid = str(list(second.walk("VEVENT"))[0]["uid"])
+    assert first_uid == second_uid

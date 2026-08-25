@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import hashlib
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -33,6 +34,15 @@ def build_ics_calendar(calendar_events: list[dict[str, Any]]) -> bytes:
         event.add("description", payload["description"])
         event.add("dtstart", _parse_datetime(payload["start"]))
         event.add("dtend", _parse_datetime(payload["end"]))
+        # UID and DTSTAMP are REQUIRED by RFC 5545, not optional extras --
+        # missing them can make stricter clients (Outlook historically more
+        # so than Google/Apple Calendar) reject or mishandle the import.
+        # UID is a deterministic hash of the event's own content rather than
+        # a random uuid4, so re-generating this file from the same source
+        # data twice produces the same UID -- reimporting is an update, not
+        # a duplicate.
+        event.add("uid", _build_uid(payload))
+        event.add("dtstamp", datetime.now(timezone.utc))
 
         for override in payload.get("reminders", {}).get("overrides", []):
             if override.get("method") != "popup":
@@ -54,6 +64,12 @@ def build_ics_calendar(calendar_events: list[dict[str, Any]]) -> bytes:
     # trusting the IANA zone name -- this embeds one per zone actually used.
     calendar.add_missing_timezones()
     return calendar.to_ical()
+
+
+def _build_uid(payload: dict[str, Any]) -> str:
+    key = f"{payload['start']['dateTime']}|{payload['end']['dateTime']}|{payload['summary']}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return f"{digest}@scheduler-agents.local"
 
 
 def _parse_datetime(spec: dict[str, str]) -> datetime:
