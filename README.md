@@ -23,10 +23,9 @@ opening in Outlook.
 
 https://github.com/user-attachments/assets/e02c819c-499c-4482-abf2-e67116dea696
 
-V5 (roster screenshot): no parseable text in the email body at all -- a
-vision-capable LLM reads the actual roster image directly and extracts
-structured events + the roster's own timezone label, still checked by
-the same deterministic guardrail before anything reaches a calendar.
+V4 (timesheet): the vendor's Purchase Order PDF -- not the email body --
+carries the job id/period/amount; those get extracted and used to fill a
+real Word invoice, saved locally, never submitted anywhere automatically.
 
 https://github.com/user-attachments/assets/d009ac00-33d4-4e4e-85a2-cabc69464233
 
