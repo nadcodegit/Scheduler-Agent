@@ -18,11 +18,10 @@ https://github.com/user-attachments/assets/77bf3bc5-b211-48c4-8c02-c501160e6652
 V2 (coverage_request): the human-in-the-loop step -- the agent checks the
 offered slot against the local approved-schedule store, states the
 conflict result explicitly, then asks a real y/n question in the
-terminal before drafting anything.
+terminal before drafting anything, and ends with `schedule.ics` actually
+opening in Outlook.
 
 https://github.com/user-attachments/assets/e02c819c-499c-4482-abf2-e67116dea696
-
-The .ics file actually opening in Outlook -- coming soon.
 
 ## Architecture
 
