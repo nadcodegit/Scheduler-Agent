@@ -13,7 +13,7 @@ V1 (schedule): classify -> extract -> deterministic guardrail -> calendar
 events -> `schedule.ics` saved, ready to double-click into a real calendar
 app.
 
-▶ [**Watch the V1 demo**](demo/v1_schedule_demo.mp4) (opens GitHub's own video player)
+https://github.com/user-attachments/assets/77bf3bc5-b211-48c4-8c02-c501160e6652
 
 More workflows (V2's human-in-the-loop coverage accept/decline, the .ics
 file actually opening in Outlook) coming soon.
