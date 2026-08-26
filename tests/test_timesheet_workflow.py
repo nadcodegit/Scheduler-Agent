@@ -26,7 +26,7 @@ PURCHASE ORDER
 For the attention of
 000000 Jane Doe
 123 Example Street
-33
+Apt 1
 Sample City, Example Country [XX]
 Job ID Description
 2026/2609/#1/1 000000_Jane Doe_March 2026
