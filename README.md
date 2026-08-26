@@ -7,6 +7,17 @@
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
 
+## Demo
+
+V1 (schedule): classify -> extract -> deterministic guardrail -> calendar
+events -> `schedule.ics` saved, ready to double-click into a real calendar
+app.
+
+<video src="demo/v1_schedule_demo.mp4" controls width="700"></video>
+
+More workflows (V2's human-in-the-loop coverage accept/decline, the .ics
+file actually opening in Outlook) coming soon.
+
 ## Architecture
 
 A shared spine (receive email -> classify -> route) fans out into four
