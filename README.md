@@ -29,6 +29,13 @@ real Word invoice, saved locally, never submitted anywhere automatically.
 
 https://github.com/user-attachments/assets/d009ac00-33d4-4e4e-85a2-cabc69464233
 
+V5 (roster screenshot): no parseable text in the email body at all -- a
+vision-capable LLM reads the actual roster image directly and extracts
+structured events + the roster's own timezone label, still checked by
+the same deterministic guardrail before anything reaches a calendar.
+
+https://github.com/user-attachments/assets/8f0bf1fd-972b-42e6-aae5-3144c7b58e5c
+
 ## Architecture
 
 A shared spine (receive email -> classify -> route) fans out into four
