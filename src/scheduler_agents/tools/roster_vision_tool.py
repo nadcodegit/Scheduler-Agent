@@ -102,10 +102,15 @@ def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str, api_k
         # an explicit cap, the default max token limit truncates the JSON
         # mid-array on a real roster (verified live: cut off at char 4019,
         # finish_reason "length") even though it never showed up against the
-        # small 5-event demo fixture used for earlier testing. High enough
-        # to comfortably cover a full month, still a hard ceiling against a
-        # runaway response.
-        "max_tokens": 8000,
+        # small 5-event demo fixture used for earlier testing. 4096 is
+        # already far more than a real month's JSON output ever actually
+        # needs (a 46-event synthetic roster used well under half of it) --
+        # deliberately not higher: Groq's on-demand tier rejects a request
+        # outright once (image input tokens + max_tokens) exceeds its flat
+        # 8000 TPM cap, verified live against the small demo roster image --
+        # this isn't the rolling rate-limit window from the retry logic
+        # below, it's a hard per-request ceiling no amount of waiting fixes.
+        "max_tokens": 4096,
         "messages": [
             {
                 "role": "user",

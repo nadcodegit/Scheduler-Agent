@@ -1,119 +1,20 @@
 {
-  "run_id": "148ea615-94b7-4201-a30f-c8a66e37e853",
+  "run_id": "c88691c1-4abd-4b32-a4d9-77059ee678b3",
   "email": {
-    "subject": "Your September schedule is ready",
+    "subject": "May Roster",
     "sender": "scheduler@example.com",
-    "body": "Hello,\n\nPlease find your interpretation schedule for September below:\n\nSep 1, 2026, 09:00-12:00, English\nSep 2, 2026, 13:00-17:00, English\nSep 4, 2026, 10:00-14:00, Turkish\n\nBest,\nScheduler",
+    "body": "hope you're doing well. I'm sending the May roster, please review it and let me know if the slots work for you.\n\nAdditionally, it might have happened that I could not assign you all wished slots due to capacity requirements and I'm sorry. However, feel free to double check if that's the case.\n\nPlease note that on May 4 and 25, the slots might be different than your usual ones due to bank holiday, as the capacity is reduced some slots were cancelled. If your slots were reduced, you will see blue 0 in the roster - do not login during these hours.\n\nThank you for understanding and I hope that you are having a nice day!",
     "attachments": [],
     "sent_date": null,
     "roster_image_path": null
   },
   "email_type": "schedule",
-  "extracted_events": [
-    {
-      "date": "2026-09-01",
-      "start_time": "09:00:00",
-      "end_time": "12:00:00",
-      "language": "Persian",
-      "source": "email",
-      "title": "Interpretation Session"
-    },
-    {
-      "date": "2026-09-02",
-      "start_time": "13:00:00",
-      "end_time": "17:00:00",
-      "language": "Persian",
-      "source": "email",
-      "title": "Interpretation Session"
-    },
-    {
-      "date": "2026-09-04",
-      "start_time": "10:00:00",
-      "end_time": "14:00:00",
-      "language": "Persian",
-      "source": "email",
-      "title": "Interpretation Session"
-    }
+  "extracted_events": [],
+  "validation_errors": [
+    "No schedule events were extracted."
   ],
-  "validation_errors": [],
-  "approval_required": false,
-  "calendar_events": [
-    {
-      "summary": "Interpretation Session",
-      "description": "Language: Persian",
-      "start": {
-        "dateTime": "2026-09-01T09:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-01T12:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    },
-    {
-      "summary": "Interpretation Session",
-      "description": "Language: Persian",
-      "start": {
-        "dateTime": "2026-09-02T13:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-02T17:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    },
-    {
-      "summary": "Interpretation Session",
-      "description": "Language: Persian",
-      "start": {
-        "dateTime": "2026-09-04T10:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "end": {
-        "dateTime": "2026-09-04T14:00:00",
-        "timeZone": "Asia/Yerevan"
-      },
-      "reminders": {
-        "useDefault": false,
-        "overrides": [
-          {
-            "method": "popup",
-            "minutes": 30
-          },
-          {
-            "method": "email",
-            "minutes": 120
-          }
-        ]
-      }
-    }
-  ],
+  "approval_required": true,
+  "calendar_events": [],
   "memory_snapshot": {
     "timezone": "Asia/Yerevan",
     "default_language": "Persian",
@@ -129,7 +30,7 @@
     {
       "name": "after_receive_email",
       "details": {
-        "subject": "Your September schedule is ready",
+        "subject": "May Roster",
         "sender": "scheduler@example.com",
         "source": "sample"
       }
@@ -150,9 +51,15 @@
       "details": {}
     },
     {
-      "name": "parse_schedule_skipped",
+      "name": "roster_image_parse_failed",
       "details": {
-        "reason": "already_extracted_by_llm"
+        "error": "All configured vision providers failed; last error: litellm.AuthenticationError: GeminiException - {\n  \"error\": {\n    \"code\": 401,\n    \"message\": \"Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\",\n    \"status\": \"UNAUTHENTICATED\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"ACCESS_TOKEN_TYPE_UNSUPPORTED\",\n        \"metadata\": {\n          \"method\": \"google.ai.generativelanguage.v1alpha.GenerativeService.GenerateContent\",\n          \"service\": \"generativelanguage.googleapis.com\"\n        }\n      }\n    ]\n  }\n}\n"
+      }
+    },
+    {
+      "name": "after_parse_schedule",
+      "details": {
+        "event_count": 0
       }
     },
     {
@@ -162,8 +69,8 @@
     {
       "name": "after_validate_schedule",
       "details": {
-        "error_count": 0,
-        "approval_required": false
+        "error_count": 1,
+        "approval_required": true
       }
     },
     {
@@ -171,15 +78,9 @@
       "details": {}
     },
     {
-      "name": "approved_schedule_saved",
+      "name": "calendar_creation_blocked",
       "details": {
-        "event_count": 3
-      }
-    },
-    {
-      "name": "after_create_calendar_events",
-      "details": {
-        "event_count": 3
+        "reason": "validation_errors"
       }
     }
   ],
@@ -199,5 +100,5 @@
   "timesheet_approval_required": false,
   "live_pdf_attachment_path": null,
   "live_roster_image_path": null,
-  "id": "c83f5f31-407d-40c2-9930-86fe01818f9c"
+  "id": "5685a20c-6bbf-4a0a-9b0f-2c67c1271126"
 }
