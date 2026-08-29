@@ -49,7 +49,7 @@ from scheduler_agents.tools.coverage_tool import (
     has_conflict,
     parse_coverage_request_regex,
 )
-from scheduler_agents.tools.gmail_tool import fetch_latest_email, is_live_gmail_enabled
+from scheduler_agents.tools.gmail_tool import create_draft_reply, fetch_latest_email, is_live_gmail_enabled
 from scheduler_agents.tools.invoice_tool import fill_invoice_template
 from scheduler_agents.tools.roster_vision_tool import parse_roster_image, resolve_timezone
 from scheduler_agents.tools.schedule_parser_tool import parse_schedule_text
@@ -405,6 +405,23 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         self.state.coverage_decisions = decisions
         self.state.coverage_reply_draft = draft_coverage_reply_multi(decisions, unstructured_note)
+
+        # Only for a real live email (thread_id is never set for a sample
+        # file) -- files the draft into the *actual* Gmail thread rather
+        # than just leaving it in this process's own state. Still never
+        # sends: the human opens Gmail and reviews/sends it themselves.
+        if is_live_gmail_enabled() and email.thread_id:
+            try:
+                self.state.coverage_gmail_draft_id = create_draft_reply(
+                    to=email.sender,
+                    subject=email.subject,
+                    body=self.state.coverage_reply_draft,
+                    thread_id=email.thread_id,
+                    in_reply_to=email.rfc_message_id,
+                )
+                record_hook(self.state, "coverage_gmail_draft_created", draft_id=self.state.coverage_gmail_draft_id)
+            except Exception as exc:  # never let a Gmail write failure crash the flow
+                record_hook(self.state, "coverage_gmail_draft_failed", error=str(exc))
 
         record_hook(
             self.state,

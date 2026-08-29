@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scheduler_agents.tools.gmail_tool import fetch_latest_email, is_live_gmail_enabled
+from scheduler_agents.tools.gmail_tool import create_draft_reply, fetch_latest_email, is_live_gmail_enabled
 
 
 def test_is_live_gmail_enabled_false_by_default():
@@ -76,17 +76,30 @@ class _FakeMessagesResource:
         return self.attachments_resource
 
 
+class _FakeDraftsResource:
+    def __init__(self):
+        self.create_calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.create_calls.append(kwargs)
+        return _FakeExecutable({"id": "draft-1"})
+
+
 class _FakeUsersResource:
-    def __init__(self, messages_resource: _FakeMessagesResource):
+    def __init__(self, messages_resource: _FakeMessagesResource | None = None, drafts_resource: _FakeDraftsResource | None = None):
         self._messages_resource = messages_resource
+        self._drafts_resource = drafts_resource or _FakeDraftsResource()
 
     def messages(self):
         return self._messages_resource
 
+    def drafts(self):
+        return self._drafts_resource
+
 
 class _FakeService:
-    def __init__(self, messages_resource: _FakeMessagesResource):
-        self._users_resource = _FakeUsersResource(messages_resource)
+    def __init__(self, messages_resource: _FakeMessagesResource | None = None, drafts_resource: _FakeDraftsResource | None = None):
+        self._users_resource = _FakeUsersResource(messages_resource, drafts_resource)
 
     def users(self):
         return self._users_resource
@@ -129,12 +142,14 @@ def test_fetch_latest_email_defaults_to_glocco_only_query(monkeypatch: pytest.Mo
 
 def test_fetch_latest_email_parses_plain_text_message(monkeypatch: pytest.MonkeyPatch):
     get_result = {
+        "threadId": "thread-abc",
         "payload": {
             "mimeType": "text/plain",
             "headers": [
                 {"name": "Subject", "value": "Coverage needed"},
                 {"name": "From", "value": "scheduler@example.com"},
                 {"name": "Date", "value": "Thu, 5 Nov 2026 09:15:00 +0000"},
+                {"name": "Message-ID", "value": "<abc123@mail.gmail.com>"},
             ],
             "body": {"data": _b64("Sep 10, 2026, 14:00-16:00, English")},
         }
@@ -153,6 +168,8 @@ def test_fetch_latest_email_parses_plain_text_message(monkeypatch: pytest.Monkey
     assert email.sender == "scheduler@example.com"
     assert email.body == "Sep 10, 2026, 14:00-16:00, English"
     assert email.sent_date.isoformat() == "2026-11-05"
+    assert email.thread_id == "thread-abc"
+    assert email.rfc_message_id == "<abc123@mail.gmail.com>"
     assert messages_resource.list_calls[0]["q"] == "is:unread"
 
 
@@ -292,3 +309,72 @@ def test_fetch_latest_email_does_not_save_when_no_pdf_attachment_present(
 
     assert email.attachments == []
     assert not save_path.exists()
+
+
+def _decode_raw_message(raw: str):
+    from email import message_from_bytes
+
+    return message_from_bytes(base64.urlsafe_b64decode(raw.encode("utf-8")))
+
+
+def test_create_draft_reply_never_sends_only_creates_a_draft(monkeypatch: pytest.MonkeyPatch):
+    """The one write operation this integration performs -- confirms it
+    calls drafts().create(), never messages().send()."""
+
+    drafts_resource = _FakeDraftsResource()
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(drafts_resource=drafts_resource)
+    )
+
+    draft_id = create_draft_reply(to="scheduler@glocco.com", subject="Coverage needed", body="I can cover this.")
+
+    assert draft_id == "draft-1"
+    assert len(drafts_resource.create_calls) == 1
+
+
+def test_create_draft_reply_threads_into_the_original_conversation(monkeypatch: pytest.MonkeyPatch):
+    """Without threadId/In-Reply-To, a reply would show up as a disconnected
+    new email instead of an actual reply in the vendor's inbox."""
+
+    drafts_resource = _FakeDraftsResource()
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(drafts_resource=drafts_resource)
+    )
+
+    create_draft_reply(
+        to="scheduler@glocco.com",
+        subject="Coverage needed",
+        body="I can cover this.",
+        thread_id="thread-abc",
+        in_reply_to="<original@mail.gmail.com>",
+    )
+
+    call = drafts_resource.create_calls[0]
+    assert call["body"]["message"]["threadId"] == "thread-abc"
+    message = _decode_raw_message(call["body"]["message"]["raw"])
+    assert message["In-Reply-To"] == "<original@mail.gmail.com>"
+    assert message["References"] == "<original@mail.gmail.com>"
+
+
+def test_create_draft_reply_does_not_double_prefix_existing_re(monkeypatch: pytest.MonkeyPatch):
+    drafts_resource = _FakeDraftsResource()
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(drafts_resource=drafts_resource)
+    )
+
+    create_draft_reply(to="scheduler@glocco.com", subject="Re: Coverage needed", body="body")
+
+    message = _decode_raw_message(drafts_resource.create_calls[0]["body"]["message"]["raw"])
+    assert message["Subject"] == "Re: Coverage needed"
+
+
+def test_create_draft_reply_adds_re_prefix_when_missing(monkeypatch: pytest.MonkeyPatch):
+    drafts_resource = _FakeDraftsResource()
+    monkeypatch.setattr(
+        "scheduler_agents.tools.gmail_tool._get_service", lambda: _FakeService(drafts_resource=drafts_resource)
+    )
+
+    create_draft_reply(to="scheduler@glocco.com", subject="Coverage needed", body="body")
+
+    message = _decode_raw_message(drafts_resource.create_calls[0]["body"]["message"]["raw"])
+    assert message["Subject"] == "Re: Coverage needed"

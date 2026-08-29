@@ -32,6 +32,16 @@ class EmailInput(BaseModel):
     # arrives as an image, never text or a PDF). None means no image was
     # found on this message, not "check the file".
     roster_image_path: str | None = None
+    # Gmail's own thread/message identifiers, set only when this came from a
+    # live fetch (never from a sample file) -- needed to file a reply draft
+    # into the *same* conversation instead of creating a disconnected new
+    # email. None for sample-file runs, where there's no real thread to
+    # reply into anyway.
+    thread_id: str | None = None
+    # The RFC 2822 "Message-ID" header (e.g. "<abc123@mail.gmail.com>"), not
+    # Gmail's own internal message id -- this is what a reply's own
+    # In-Reply-To/References headers need to thread correctly.
+    rfc_message_id: str | None = None
 
 
 class TimeSlot(BaseModel):
@@ -118,6 +128,11 @@ class SchedulerFlowState(BaseModel):
     # slots. That can't be safely turned into calendar dates, so it's kept
     # here as a note for the human rather than silently dropped.
     coverage_unstructured_note: str | None = None
+    # Gmail's own draft id, set only when a real draft was actually filed
+    # (live Gmail enabled and this email came from a real thread, not a
+    # sample file). None means no draft was created this run -- the reply
+    # text above is still available either way, just not in Gmail itself.
+    coverage_gmail_draft_id: str | None = None
 
     # Availability-request workflow (V3)
     availability_period: str | None = None

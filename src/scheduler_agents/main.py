@@ -98,6 +98,8 @@ def main() -> None:
             print(f"Unstructured (non-dated) request noted: {state.coverage_unstructured_note}")
         print(f"Approval required before sending: {state.coverage_approval_required}")
         print(f"Reply draft:\n{state.coverage_reply_draft}")
+        if state.coverage_gmail_draft_id:
+            print(f"Saved as a real Gmail draft (id={state.coverage_gmail_draft_id}) -- review and send it yourself.")
     elif state.email_type == "availability_request":
         print(f"Requested period: {state.availability_period}")
         print(f"Approval required before sending: {state.availability_approval_required}")

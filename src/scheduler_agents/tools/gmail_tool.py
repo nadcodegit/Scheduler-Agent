@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import base64
 import os
+from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
 from scheduler_agents.models.state import EmailInput
 
-# Read-only on purpose: this integration only ever reads a message. It never
-# marks anything read, labels, archives, sends, or deletes -- the same
-# never-act-on-the-real-account-automatically rule every other external
-# integration in this project follows. A human decides what happens to the
-# source email themselves, in their own inbox.
-_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# Read-only for fetching, plus the narrowest scope that allows creating a
+# draft reply -- gmail.compose, not gmail.modify or full mail.google.com
+# access. gmail.compose covers create/read/update/delete of drafts and
+# *only* sending messages this app itself created; it cannot touch, label,
+# archive, or delete anything already in the mailbox. This project never
+# calls the send endpoint -- every draft sits in the account for the human
+# to review and send themselves, the same never-auto-act rule as
+# everywhere else, just extended one step from "read" to "propose."
+_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 
 
 def is_live_gmail_enabled() -> bool:
@@ -155,6 +162,8 @@ def fetch_latest_email(
         attachments=attachments,
         sent_date=sent_date,
         roster_image_path=roster_image_path,
+        thread_id=message.get("threadId"),
+        rfc_message_id=headers.get("message-id"),
     )
 
 
@@ -258,3 +267,41 @@ def _fetch_attachment_bytes(service, message_id: str, part: dict[str, Any]) -> b
         )
         data = attachment["data"]
     return base64.urlsafe_b64decode(data.encode("utf-8"))
+
+
+def create_draft_reply(
+    to: str,
+    subject: str,
+    body: str,
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+) -> str | None:
+    """Creates a real Gmail draft -- never sends it. This is the one write
+    operation this integration performs, using the narrowest scope that
+    allows it (see _SCOPES above); a human still has to open Gmail, review
+    it, and hit send themselves.
+
+    When `thread_id`/`in_reply_to` are given (always true for a live-fetched
+    email, never for a sample-file run), the draft is filed into the
+    *original* conversation via the standard In-Reply-To/References headers
+    plus Gmail's own threadId -- otherwise it would show up as a
+    disconnected new email instead of an actual reply.
+    """
+
+    service = _get_service()
+
+    message = EmailMessage()
+    message["To"] = to
+    message["Subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+        message["References"] = in_reply_to
+    message.set_content(body)
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+    draft_message: dict[str, Any] = {"raw": raw}
+    if thread_id:
+        draft_message["threadId"] = thread_id
+
+    draft = service.users().drafts().create(userId="me", body={"message": draft_message}).execute()
+    return draft.get("id")
