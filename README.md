@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -176,7 +176,12 @@ immediately (not just for future emails): if the same request offers two
 overlapping slots, accepting the first makes the second show up as a
 conflict too. One combined reply is drafted covering every slot; accepted
 slots are added to `calendar_events` and the approved-schedule store. The
-reply is always a draft -- nothing is ever sent automatically.
+reply is always a draft -- nothing is ever sent automatically. When live
+Gmail is enabled and the email came from a real thread, that draft is also
+filed as an actual Gmail draft (`gmail_tool.create_draft_reply`), threaded
+into the original conversation via `In-Reply-To`/`References` and Gmail's
+own `threadId` -- still never sent; a human opens Gmail and sends it
+themselves.
 
 ```text
 coverage email -> extract N slots (+ optional vague note) -> check each conflict -> ask human per slot (y/n) -> one combined draft + calendar updates for accepted slots
@@ -512,16 +517,21 @@ Purchase Order/invoicing notifications (confirmed live -- a
 from `glocco.sk` until this was caught and fixed). Override the env var
 only if you need something narrower/different.
 
-The OAuth scope is deliberately the narrowest one that exists for this --
-`gmail.readonly`. This integration calls `list`/`get` only: it never marks a
-message read, labels it, archives it, sends anything, or deletes anything.
+The OAuth scope is deliberately the narrowest one that exists for reading --
+`gmail.readonly`, plus (since V2's real Gmail draft, below) `gmail.compose`,
+which covers only creating/reading/updating/deleting *this app's own*
+drafts and sending messages *it created itself* -- not `gmail.modify` or
+full mailbox access. Either way, this integration never marks a message
+read, labels it, archives it, deletes anything, or calls the send endpoint.
 A human decides what happens to the source email in their own inbox; this
-agent only ever reads it. The one-time consent runs in your own browser on
-first live run and caches a refresh token to `token.json` (gitignored) so
-it doesn't prompt again. A live fetch failure (expired token, network, or
-simply nothing matching the query) is logged as a hook event and falls back
-to the sample-file path rather than crashing, same as every other external
-call in this project.
+agent only ever reads it, and (for coverage replies) proposes a draft. The
+one-time consent runs in your own browser on first live run and caches a
+refresh token to `token.json` (gitignored) so it doesn't prompt again --
+widening the scope invalidates a token cached under the old one, so it
+needs deleting once for a fresh consent. A live fetch failure (expired
+token, network, or simply nothing matching the query) is logged as a hook
+event and falls back to the sample-file path rather than crashing, same as
+every other external call in this project.
 
 ## Run
 
@@ -774,6 +784,16 @@ backfill in `validate_schedule` in case a model sends one anyway.
     (missing UID/DTSTAMP; a stale historical DST rule in the
     auto-generated VTIMEZONE block) found by actually opening the file
     in the target app rather than just inspecting it as text.
+16. ~~V2's reply draft only ever lived in the terminal/flow_state.json, not
+    somewhere a human could actually send it from~~ -- done: when live
+    Gmail is enabled and the email came from a real thread,
+    `handle_coverage_request` now creates a real Gmail draft
+    (`gmail_tool.create_draft_reply`), threaded into the original
+    conversation via `In-Reply-To`/`References` and Gmail's own
+    `threadId`. Required widening the OAuth scope to add `gmail.compose`
+    (still not `gmail.modify` or full mailbox access, and the send
+    endpoint is never called) -- still a draft only, a human reviews and
+    sends it themselves.
 
 ## Course-Style CrewAI Pieces
 
