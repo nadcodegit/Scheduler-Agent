@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -16,7 +17,14 @@ class UserMemory:
     default_language: str = "Persian"
     scheduler_email: str = "scheduler@example.com"
     calendar_name: str = "Work"
-    vendor_id: str = "000000"
+    # Read from VENDOR_ID in .env (gitignored, never committed) rather than
+    # hardcoded, so this real identifier never sits in source control -- the
+    # public repo's own default stays the generic placeholder. A
+    # default_factory (not a plain class-level default) is required here:
+    # this module gets imported before main.py's load_dotenv() call runs, so
+    # a plain `= os.getenv(...)` default would freeze in at import time and
+    # never see the real .env value.
+    vendor_id: str = field(default_factory=lambda: os.getenv("VENDOR_ID", "000000"))
 
     def snapshot(self) -> dict[str, object]:
         return {
