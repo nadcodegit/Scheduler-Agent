@@ -352,8 +352,7 @@ scheduler-agents/
 ├── evals/
 │   └── run_eval.py
 ├── scripts/
-│   ├── run_scheduled_check.ps1  (see "Running unattended" above)
-│   └── run_scheduled_check.cmd
+│   └── run_scheduled_check.ps1  (see "Running unattended" above)
 ├── sample_data/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
@@ -557,27 +556,42 @@ deciding anything -- never guessing what you'd have answered.
 `scripts/run_scheduled_check.ps1` wraps a single run, appending its full
 output (with a timestamp header) to `outputs/scheduled_run.log`
 (gitignored -- can accumulate real email content over time) so there's
-something to check afterward, rather than output going nowhere. Register
-it as a recurring Windows Task Scheduler task (no stored credentials --
-runs as your own already-logged-in user):
+something to check afterward, rather than output going nowhere. When a
+run hits "ACTION NEEDED" (a V2/V3 email is waiting on you), it also pops
+a native Windows toast notification -- the log alone is easy to forget to
+check, a notification on your desktop is not.
+
+Register it as a recurring Windows Task Scheduler task (no stored
+credentials -- runs as your own already-logged-in user), using
+PowerShell's `ScheduledTasks` module rather than `schtasks.exe` directly:
 
 ```powershell
-schtasks /create /tn "SchedulerAgentsEmailCheck" /tr "C:\path\to\scheduler-agents\scripts\run_scheduled_check.cmd" /sc minute /mo 30 /f
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument '-ExecutionPolicy Bypass -File "C:\path\to\scheduler-agents\scripts\run_scheduled_check.ps1"'
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+Register-ScheduledTask -TaskName "SchedulerAgentsEmailCheck" -Action $action -Trigger $trigger -Settings $settings
 ```
 
-(`run_scheduled_check.cmd` is a one-line trampoline into the `.ps1` --
-`schtasks /tr` doesn't reliably parse a path containing spaces *and* its
-own quoted sub-arguments, a real, well-known quirk with this exact
-project's path since "New project" has a space in it; pointing `/tr`
-directly at a plain file with no arguments sidesteps it entirely.)
+(`schtasks.exe`'s own `/tr` string parser doesn't reliably handle a path
+containing spaces *and* its own quoted sub-arguments -- a real quirk with
+this exact project's path since "New project" has a space in it. Worse,
+routing `/tr` through a `.cmd` trampoline plus an 8.3 short path to dodge
+that parsing bug creates a second, much sneakier problem: Task Scheduler
+launches it via `CreateProcess`, which doesn't resolve `.cmd` file
+associations the way double-clicking or `schtasks /run` from a live shell
+does -- so the task reports success [`Last Result: 0`] on every trigger
+while silently never actually running anything. Building the action with
+`New-ScheduledTaskAction` sidesteps both problems: it passes `Execute`
+and `Argument` as separate, already-parsed fields, and points straight at
+`powershell.exe` -- a real `.exe`, no file-association resolution needed.)
 
 V1/V4 emails process fully unattended. For V2/V3, check the log
 periodically and re-run `uv run python -m scheduler_agents.main`
-yourself, interactively, whenever you see an "ACTION NEEDED" line --
-this is a lighter-weight alternative to Next Steps item 3's originally-
-proposed async notification channel (Telegram, etc.): no new
+yourself, interactively, whenever you see an "ACTION NEEDED" line (or get
+the toast) -- this is a lighter-weight alternative to Next Steps item 3's
+originally-proposed async notification channel (Telegram, etc.): no new
 infrastructure, but the decision still waits for you to come back to a
-real terminal rather than notifying you the moment it's needed.
+real terminal rather than being answerable from the notification itself.
 
 ## Run
 
@@ -846,12 +860,14 @@ backfill in `validate_schedule` in case a model sends one anyway.
     live Gmail periodically; V1/V4 fully self-process, V2/V3 detect the
     lack of an interactive terminal (`NeedsHumanAttention`, raised from
     `sys.stdin.isatty()` being false) and flag themselves for later
-    instead of crashing or guessing an answer. Still not the full async
-    "ask now, notify me, resume on my answer" design item 3 originally
-    proposed -- that would need a real notification channel (Telegram,
-    etc.) plus persisted pending-decision state; this is the same
-    engineering tradeoff already declined twice before, still not
-    revisited, just worked around for the fully-automatable workflows.
+    instead of crashing or guessing an answer, popping a native Windows
+    toast notification when that happens so it's not easy to miss. Still
+    not the full async "ask now, notify me, resume on my answer" design
+    item 3 originally proposed -- that would need a real notification
+    channel (Telegram, etc.) plus persisted pending-decision state; this
+    is the same engineering tradeoff already declined twice before, still
+    not revisited, just worked around for the fully-automatable
+    workflows.
 
 ## Course-Style CrewAI Pieces
 
