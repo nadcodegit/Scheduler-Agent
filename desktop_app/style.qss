@@ -21,6 +21,7 @@ QMainWindow, QWidget {
 
 #HeaderBar QLabel {
     color: white;
+    background: transparent;
 }
 
 #HeaderTitle {
