@@ -9,6 +9,13 @@ class UserMemory:
     """Local non-secret memory for stable user preferences."""
 
     timezone: str = "Asia/Yerevan"
+    # Same VENDOR_ID pattern/rationale below: read from env at instantiation
+    # time (default_factory, not a plain class default) so the real value
+    # never freezes in before .env is loaded and never sits in source
+    # control -- the public repo's own default stays a generic placeholder.
+    # Signs V2/V3 reply drafts and labels the desktop app's own window.
+    full_name: str = field(default_factory=lambda: os.getenv("USER_FULL_NAME", "Your Name"))
+    email: str = field(default_factory=lambda: os.getenv("USER_EMAIL", ""))
     # This vendor relationship is Persian interpretation only -- a known
     # fact about the interpreter's employment, not per-email data. Every
     # schedule event and coverage slot gets this assigned unconditionally
@@ -33,5 +40,7 @@ class UserMemory:
             "scheduler_email": self.scheduler_email,
             "calendar_name": self.calendar_name,
             "vendor_id": self.vendor_id,
+            "full_name": self.full_name,
+            "email": self.email,
         }
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
+from scheduler_agents.memory.user_memory import UserMemory
 from scheduler_agents.models.state import EmailInput
 from scheduler_agents.tools.availability_tool import draft_availability_reply, extract_requested_period
 
@@ -33,6 +34,24 @@ def test_draft_availability_reply_uses_fallback_when_period_unknown():
 
     assert "the requested period" in draft
     assert "I'm free every weekday." in draft
+
+
+def test_draft_availability_reply_signs_with_the_given_name():
+    draft = draft_availability_reply("June", "Free all month.", signature="Jane Doe")
+
+    assert draft.endswith("Best,\nJane Doe")
+
+
+def test_scheduler_flow_signs_availability_reply_with_memory_full_name():
+    flow = SchedulerFlow(
+        sample_email_path=SAMPLE_DATA / "sample_availability_request_email.txt",
+        ask_availability=lambda period: "Free all month.",
+        memory=UserMemory(full_name="Jane Doe"),
+    )
+
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.availability_reply_draft.endswith("Best,\nJane Doe")
 
 
 def test_scheduler_flow_drafts_availability_reply():

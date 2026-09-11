@@ -20,6 +20,10 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
 
     app = QApplication(sys.argv)
+    style_path = Path(__file__).resolve().parent / "style.qss"
+    if style_path.exists():
+        app.setStyleSheet(style_path.read_text(encoding="utf-8"))
+
     window = MainWindow(project_root)
     window.show()
     sys.exit(app.exec())

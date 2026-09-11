@@ -253,7 +253,9 @@ def describe_slot(slot: CoverageSlot) -> str:
     )
 
 
-def draft_coverage_reply_multi(decisions: list[CoverageSlotDecision], unstructured_note: str | None) -> str:
+def draft_coverage_reply_multi(
+    decisions: list[CoverageSlotDecision], unstructured_note: str | None, signature: str = "[Your name]"
+) -> str:
     """Template-based reply draft covering every slot at once -- deterministic
     on purpose, like every other draft in this project. Never sent by the
     flow; a human reviews and sends it manually.
@@ -280,6 +282,6 @@ def draft_coverage_reply_multi(decisions: list[CoverageSlotDecision], unstructur
 
     lines.append("")
     lines.append("Best,")
-    lines.append("[Your name]")
+    lines.append(signature)
 
     return "\n".join(lines)

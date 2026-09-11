@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHeaderView, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 COLUMNS = ["Timestamp", "Type", "Subject", "Sender", "Source", "Summary"]
+ATTENTION_BG = QColor("#fbe4e4")
+OK_BG = QColor("#e7f5e8")
 
 
 class HistoryTab(QWidget):
@@ -43,8 +46,9 @@ class HistoryTab(QWidget):
 
         self.table.setRowCount(len(records))
         for row, record in enumerate(records):
+            needs_attention = bool(record.get("needs_attention"))
             summary = record.get("summary") or ""
-            if record.get("needs_attention"):
+            if needs_attention:
                 summary = f"[NEEDS ATTENTION] {summary}"
             values = [
                 record.get("timestamp", ""),
@@ -54,5 +58,8 @@ class HistoryTab(QWidget):
                 record.get("source") or "",
                 summary,
             ]
+            row_color = ATTENTION_BG if needs_attention else OK_BG
             for col, value in enumerate(values):
-                self.table.setItem(row, col, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                item.setBackground(row_color)
+                self.table.setItem(row, col, item)

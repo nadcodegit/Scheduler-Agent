@@ -1,0 +1,140 @@
+/* Scheduler Agents desktop app theme.
+   Accent purple matches the project's own README badge (CrewAI Flow,
+   #6f42c1) so the app visually ties back to the same project. */
+
+* {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 10.5pt;
+}
+
+QMainWindow, QWidget {
+    background: #f5f4fa;
+    color: #26232e;
+}
+
+#HeaderBar {
+    background: #6f42c1;
+    color: white;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+#HeaderBar QLabel {
+    color: white;
+}
+
+#HeaderTitle {
+    font-size: 13pt;
+    font-weight: 600;
+}
+
+#HeaderSubtitle {
+    font-size: 9.5pt;
+    color: #e4d9f7;
+}
+
+QTabWidget::pane {
+    border: 1px solid #d9d3ea;
+    border-radius: 6px;
+    background: white;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: #ece7f6;
+    color: #4a4458;
+    padding: 8px 18px;
+    margin-right: 2px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+QTabBar::tab:selected {
+    background: #6f42c1;
+    color: white;
+    font-weight: 600;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #d9c9f2;
+}
+
+QPushButton {
+    background: #6f42c1;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+
+QPushButton:hover {
+    background: #5c359e;
+}
+
+QPushButton:pressed {
+    background: #4a2b80;
+}
+
+QPushButton:disabled {
+    background: #c9bfdd;
+    color: #f0ecf9;
+}
+
+QLabel[status="ok"] {
+    color: #2f7d32;
+    font-weight: 600;
+}
+
+QLabel[status="attention"] {
+    color: #c62828;
+    font-weight: 700;
+}
+
+QLabel[status="idle"] {
+    color: #4a4458;
+    font-weight: 600;
+}
+
+QTableWidget {
+    background: white;
+    alternate-background-color: #f2effa;
+    gridline-color: #e3ddf0;
+    selection-background-color: #d9c9f2;
+    selection-color: #26232e;
+    border: none;
+}
+
+QHeaderView::section {
+    background: #6f42c1;
+    color: white;
+    padding: 6px;
+    border: none;
+    font-weight: 600;
+}
+
+QListWidget {
+    background: white;
+    border: 1px solid #d9d3ea;
+    border-radius: 5px;
+}
+
+QCalendarWidget QToolButton {
+    color: #26232e;
+    font-weight: 600;
+    background: transparent;
+}
+
+QCalendarWidget QMenu {
+    background: white;
+}
+
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background: #ece7f6;
+}
+
+QTextEdit {
+    background: white;
+    border: 1px solid #d9d3ea;
+    border-radius: 5px;
+}

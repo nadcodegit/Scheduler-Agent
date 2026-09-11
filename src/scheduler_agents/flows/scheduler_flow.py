@@ -436,7 +436,9 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                     save_approved_schedule([schedule_event], self.approved_schedule_path)
 
         self.state.coverage_decisions = decisions
-        self.state.coverage_reply_draft = draft_coverage_reply_multi(decisions, unstructured_note)
+        self.state.coverage_reply_draft = draft_coverage_reply_multi(
+            decisions, unstructured_note, signature=self.memory.full_name
+        )
 
         # Only for a real live email (thread_id is never set for a sample
         # file) -- files the draft into the *actual* Gmail thread rather
@@ -488,7 +490,9 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
             return None
 
         self.state.availability_statement = statement
-        self.state.availability_reply_draft = draft_availability_reply(period, statement)
+        self.state.availability_reply_draft = draft_availability_reply(
+            period, statement, signature=self.memory.full_name
+        )
         self.state.availability_approval_required = True
 
         # Same rationale as handle_coverage_request's Gmail draft above --

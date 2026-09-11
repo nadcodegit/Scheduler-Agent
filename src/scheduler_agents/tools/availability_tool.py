@@ -23,11 +23,11 @@ def extract_requested_period(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def draft_availability_reply(period: str | None, statement: str) -> str:
+def draft_availability_reply(period: str | None, statement: str, signature: str = "[Your name]") -> str:
     """Template-based reply draft -- deterministic on purpose, like
     coverage_tool.draft_coverage_reply. This is a draft only: the flow never
     sends it. A human reviews and sends it manually.
     """
 
     period_desc = period or "the requested period"
-    return f"Hi,\n\nHere is my availability for {period_desc}:\n\n{statement}\n\nBest,\n[Your name]"
+    return f"Hi,\n\nHere is my availability for {period_desc}:\n\n{statement}\n\nBest,\n{signature}"

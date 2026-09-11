@@ -17,6 +17,16 @@ from PySide6.QtWidgets import (
 from desktop_app.flow_worker import FlowWorker
 
 
+def _set_status_style(label: QLabel, status: str) -> None:
+    """Drives the QLabel[status="..."] rules in style.qss -- Qt only
+    re-evaluates a dynamic property's stylesheet rule after an explicit
+    unpolish/polish, a plain setProperty() alone has no visible effect."""
+
+    label.setProperty("status", status)
+    label.style().unpolish(label)
+    label.style().polish(label)
+
+
 class DashboardTab(QWidget):
     """Status at a glance, a button to check email right now, and -- when a
     V2/V3 email needs a real answer -- the actual dialog to answer it in,
@@ -54,19 +64,23 @@ class DashboardTab(QWidget):
         history_path = self.project_root / "outputs" / "run_history.jsonl"
         if not history_path.exists():
             self.status_label.setText("No runs yet -- click \"Check email now\" to run the first one.")
+            _set_status_style(self.status_label, "idle")
             return
 
         lines = history_path.read_text(encoding="utf-8").strip().splitlines()
         if not lines:
             self.status_label.setText("No runs yet -- click \"Check email now\" to run the first one.")
+            _set_status_style(self.status_label, "idle")
             return
 
         last = json.loads(lines[-1])
-        attention = " -- NEEDS YOUR ATTENTION" if last.get("needs_attention") else ""
+        needs_attention = bool(last.get("needs_attention"))
+        attention = " -- NEEDS YOUR ATTENTION" if needs_attention else " -- all clear"
         self.status_label.setText(
             f"Last checked: {last.get('timestamp', '?')}{attention}\n"
             f"Last email: {last.get('subject') or '(none)'} ({last.get('email_type') or 'n/a'})"
         )
+        _set_status_style(self.status_label, "attention" if needs_attention else "ok")
         self.log_view.setPlainText(json.dumps(last, indent=2, ensure_ascii=False))
 
     def run_check(self) -> None:
@@ -75,6 +89,7 @@ class DashboardTab(QWidget):
 
         self.check_button.setEnabled(False)
         self.status_label.setText("Checking email...")
+        _set_status_style(self.status_label, "idle")
 
         self._worker = FlowWorker(self.project_root)
         self._worker.ask_coverage.connect(self._handle_ask_coverage)
@@ -117,4 +132,5 @@ class DashboardTab(QWidget):
     def _handle_failed(self, error: str) -> None:
         self.check_button.setEnabled(True)
         self.status_label.setText(f"Check failed: {error}")
+        _set_status_style(self.status_label, "attention")
         QMessageBox.critical(self, "Check failed", error)

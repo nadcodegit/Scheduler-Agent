@@ -74,6 +74,15 @@ def test_draft_reply_multi_includes_unstructured_note():
     assert "Mon-Wed 11am-1pm all month" in draft
 
 
+def test_draft_reply_multi_signs_with_the_given_name():
+    slot = CoverageSlot(date="2026-09-10", start_time="14:00", end_time="16:00")
+    decisions = [CoverageSlotDecision(slot=slot, conflict=False, decision=CoverageDecision.ACCEPT)]
+
+    draft = draft_coverage_reply_multi(decisions, unstructured_note=None, signature="Jane Doe")
+
+    assert draft.endswith("Best,\nJane Doe")
+
+
 def test_extract_coverage_slots_via_llm_raises_without_model(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("MODEL", raising=False)
 
