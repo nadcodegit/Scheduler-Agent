@@ -30,6 +30,8 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
     needs_attention = state.coverage_needs_attention or state.availability_needs_attention
     gmail_draft_id = state.coverage_gmail_draft_id or state.availability_gmail_draft_id
 
+    conversation: dict[str, Any] | None = None
+
     if needs_attention:
         summary = "Needs your attention -- no interactive terminal was available to ask you."
     elif email_type == "schedule":
@@ -37,8 +39,33 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
     elif email_type == "coverage_request":
         accepted = sum(1 for d in state.coverage_decisions if d.decision == CoverageDecision.ACCEPT)
         summary = f"{len(state.coverage_decisions)} slot(s) decided, {accepted} accepted."
+        if state.coverage_decisions:
+            conversation = {
+                "exchanges": [
+                    {
+                        "question": (
+                            f"Can you cover {d.slot.date} {d.slot.start_time}-{d.slot.end_time} "
+                            f"({d.slot.language or 'language n/a'})? "
+                            f"Conflict with an existing commitment: {'yes' if d.conflict else 'no'}."
+                        ),
+                        "answer": "Yes, I can cover it." if d.decision == CoverageDecision.ACCEPT else "No, I can't.",
+                    }
+                    for d in state.coverage_decisions
+                ],
+                "draft": state.coverage_reply_draft,
+            }
     elif email_type == "availability_request":
         summary = f"Stated availability for {state.availability_period or 'an unspecified period'}."
+        if state.availability_statement:
+            conversation = {
+                "exchanges": [
+                    {
+                        "question": f"What's your availability for {state.availability_period or 'the requested period'}?",
+                        "answer": state.availability_statement,
+                    }
+                ],
+                "draft": state.availability_reply_draft,
+            }
     elif email_type == "timesheet":
         summary = "Invoice generated." if state.invoice_output_path else "Purchase Order could not be parsed."
     else:
@@ -55,6 +82,7 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
         "needs_attention": needs_attention,
         "gmail_draft_id": gmail_draft_id,
         "summary": summary,
+        "conversation": conversation,
     }
 
 

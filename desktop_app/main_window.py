@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
 from desktop_app.calendar_tab import CalendarTab
+from desktop_app.conversations_tab import ConversationsTab
 from desktop_app.dashboard_tab import DashboardTab
 from desktop_app.history_tab import HistoryTab
 from scheduler_agents.memory.user_memory import UserMemory
@@ -36,10 +37,12 @@ class MainWindow(QWidget):
 
         self.history_tab = HistoryTab(project_root)
         self.calendar_tab = CalendarTab(project_root)
+        self.conversations_tab = ConversationsTab(project_root)
         self.dashboard_tab = DashboardTab(project_root, on_run_finished=self._refresh_other_tabs)
 
         tabs = QTabWidget()
         tabs.addTab(self.dashboard_tab, "Dashboard")
+        tabs.addTab(self.conversations_tab, "Conversations")
         tabs.addTab(self.history_tab, "History")
         tabs.addTab(self.calendar_tab, "Calendar")
 
@@ -50,3 +53,4 @@ class MainWindow(QWidget):
     def _refresh_other_tabs(self) -> None:
         self.history_tab.refresh()
         self.calendar_tab.refresh()
+        self.conversations_tab.refresh()

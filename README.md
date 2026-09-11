@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -360,7 +360,9 @@ scheduler-agents/
 │   ├── main.py
 │   ├── main_window.py
 │   ├── flow_worker.py
+│   ├── style.qss
 │   ├── dashboard_tab.py
+│   ├── conversations_tab.py
 │   ├── history_tab.py
 │   └── calendar_tab.py
 ├── sample_data/
@@ -431,6 +433,7 @@ scheduler-agents/
     ├── test_unattended_mode.py
     ├── test_output_writer.py
     ├── test_desktop_flow_worker.py
+    ├── test_desktop_conversations_tab.py
     └── test_llm_json.py
 ```
 
@@ -628,9 +631,18 @@ uv run python -m desktop_app.main
   `QThread` so a slow live Gmail/LLM call never freezes the window; the
   thread blocks on a plain `threading.Event` while Qt's signal/slot queue
   carries the question to the dialog on the main thread and the answer back.
+- **Conversations** -- every completed V2/V3 back-and-forth, rendered as an
+  actual conversation (what the agent asked, what you answered as chat
+  bubbles) followed by a real email preview (To/Subject/body) of the draft
+  it produced, plus whether it was also filed as a real Gmail draft. Reads
+  the `conversation` field `summarize_run()` now attaches to coverage/
+  availability records in `run_history.jsonl` -- schedule/timesheet runs
+  and any run that hit `needs_attention` without an answer have no
+  conversation to show.
 - **History** -- every past run (scheduled, CLI, or from this app's own
   "Check email now"), newest first: timestamp, email type, subject,
-  sender, source, and a one-line summary of what happened. Reads a new
+  sender, source, and a one-line summary of what happened, rows tinted
+  green/red by whether they needed attention. Reads the same
   `outputs/run_history.jsonl` -- one JSON line appended per run
   (`output_writer.summarize_run`/`append_run_history`) -- gitignored, same
   reason as `scheduled_run.log`: it can accumulate real email content over

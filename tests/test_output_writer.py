@@ -92,6 +92,49 @@ def test_summarize_run_includes_whichever_gmail_draft_id_is_set():
     assert summary["gmail_draft_id"] == "draft-9"
 
 
+def test_summarize_run_builds_coverage_conversation_from_decisions():
+    from datetime import date, time
+
+    state = _state_with_email(EmailType.COVERAGE_REQUEST)
+    slot = CoverageSlot(date=date(2026, 10, 1), start_time=time(9, 0), end_time=time(12, 0), language="Persian")
+    state.coverage_decisions = [CoverageSlotDecision(slot=slot, conflict=False, decision=CoverageDecision.ACCEPT)]
+    state.coverage_reply_draft = "Hi,\n\nI can cover it.\n\nBest,\nNadereh"
+
+    summary = summarize_run(state)
+
+    assert summary["conversation"]["exchanges"] == [
+        {
+            "question": "Can you cover 2026-10-01 09:00:00-12:00:00 (Persian)? "
+            "Conflict with an existing commitment: no.",
+            "answer": "Yes, I can cover it.",
+        }
+    ]
+    assert summary["conversation"]["draft"] == state.coverage_reply_draft
+
+
+def test_summarize_run_builds_availability_conversation_from_statement():
+    state = _state_with_email(EmailType.AVAILABILITY_REQUEST)
+    state.availability_period = "June"
+    state.availability_statement = "Free weekdays 9-5."
+    state.availability_reply_draft = "Hi,\n\nFree weekdays 9-5.\n\nBest,\nNadereh"
+
+    summary = summarize_run(state)
+
+    assert summary["conversation"]["exchanges"] == [
+        {"question": "What's your availability for June?", "answer": "Free weekdays 9-5."}
+    ]
+    assert summary["conversation"]["draft"] == state.availability_reply_draft
+
+
+def test_summarize_run_conversation_is_none_for_schedule_and_needs_attention():
+    schedule_state = _state_with_email(EmailType.SCHEDULE)
+    assert summarize_run(schedule_state)["conversation"] is None
+
+    attention_state = _state_with_email(EmailType.COVERAGE_REQUEST)
+    attention_state.coverage_needs_attention = True
+    assert summarize_run(attention_state)["conversation"] is None
+
+
 def test_append_run_history_writes_one_json_line_per_call(tmp_path: Path):
     state1 = _state_with_email(EmailType.SCHEDULE, subject="first")
     state2 = _state_with_email(EmailType.SCHEDULE, subject="second")
