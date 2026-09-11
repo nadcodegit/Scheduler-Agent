@@ -42,6 +42,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _describe_email_source(state, gmail_enabled: bool, sample_email: Path) -> str:
+    """Reports what receive_email() actually did, not just whether the
+    GMAIL_ENABLED toggle is on. Printing the toggle alone was misleading: a
+    stale/expired OAuth token makes every run silently fall back to the
+    local sample email while still claiming "LIVE Gmail (read-only)",
+    which is indistinguishable from an actual live email that happens to
+    share the same subject line as the fixture.
+    """
+    if not gmail_enabled:
+        return f"sample file ({sample_email})"
+    for event in state.hooks:
+        if event.name == "after_receive_email" and event.details.get("source") == "gmail":
+            return "LIVE Gmail (read-only)"
+        if event.name == "gmail_fetch_failed":
+            return f"sample file ({sample_email}) -- LIVE Gmail fetch failed: {event.details.get('error')}"
+        if event.name == "gmail_fetch_found_nothing":
+            return f"sample file ({sample_email}) -- no unread email matched GMAIL_QUERY"
+    return f"sample file ({sample_email})"
+
+
 def main() -> None:
     if load_dotenv is not None:
         load_dotenv()
@@ -70,10 +90,8 @@ def main() -> None:
         invoice_output_dir=project_root / "outputs",
         roster_image_path=roster_image,
     )
-    email_source = "LIVE Gmail (read-only)" if is_live_gmail_enabled() else f"sample file ({sample_email})"
-    print(f"Email source: {email_source}")
-
     state = asyncio.run(flow.run_v1_async())
+    print(f"Email source: {_describe_email_source(state, is_live_gmail_enabled(), sample_email)}")
     output_paths = write_flow_outputs(state, project_root / "outputs")
 
     print(f"Run id: {state.run_id}")
