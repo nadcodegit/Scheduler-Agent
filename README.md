@@ -355,7 +355,8 @@ scheduler-agents/
 ├── evals/
 │   └── run_eval.py
 ├── scripts/
-│   └── run_scheduled_check.ps1  (see "Running unattended" above)
+│   ├── run_scheduled_check.ps1  (see "Running unattended" above)
+│   └── launch_desktop_app.cmd  (see "Desktop App" above)
 ├── desktop_app/        (see "Desktop App" above)
 │   ├── main.py
 │   ├── main_window.py
@@ -612,11 +613,16 @@ real terminal rather than being answerable from the notification itself.
 
 A real native Windows desktop app (`desktop_app/`, built with PySide6/Qt --
 the same language as the rest of this project, not a separate C#/Electron
-stack) sits on top of everything above: three tabs, one window.
+stack) sits on top of everything above: four tabs, one window.
 
 ```bash
 uv run python -m desktop_app.main
 ```
+
+`scripts/launch_desktop_app.cmd` wraps that same command (cd's into the
+project first) so it can be launched from a plain double-clickable
+shortcut instead of a terminal -- create one pointing at that `.cmd` file
+from Explorer ("Send to > Desktop (create shortcut)").
 
 - **Dashboard** -- last-run status at a glance, and a "Check email now"
   button that runs a live check in the background (the window stays
