@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-107%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -348,13 +348,21 @@ scheduler-agents/
 ├── README.md
 ├── outputs/            (generated at runtime; calendar_payloads.json,
 │                        flow_state.json, schedule.ics are committed as
-│                        demo artifacts, approved_schedule.json and any
-│                        live-downloaded PDF/image are gitignored -- may
-│                        contain real personal data)
+│                        demo artifacts, approved_schedule.json,
+│                        run_history.jsonl, and any live-downloaded
+│                        PDF/image are gitignored -- may contain real
+│                        personal data)
 ├── evals/
 │   └── run_eval.py
 ├── scripts/
 │   └── run_scheduled_check.ps1  (see "Running unattended" above)
+├── desktop_app/        (see "Desktop App" above)
+│   ├── main.py
+│   ├── main_window.py
+│   ├── flow_worker.py
+│   ├── dashboard_tab.py
+│   ├── history_tab.py
+│   └── calendar_tab.py
 ├── sample_data/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
@@ -421,6 +429,8 @@ scheduler-agents/
     ├── test_ics_tool.py
     ├── test_schedule_store.py
     ├── test_unattended_mode.py
+    ├── test_output_writer.py
+    ├── test_desktop_flow_worker.py
     └── test_llm_json.py
 ```
 
@@ -594,6 +604,49 @@ the toast) -- this is a lighter-weight alternative to Next Steps item 3's
 originally-proposed async notification channel (Telegram, etc.): no new
 infrastructure, but the decision still waits for you to come back to a
 real terminal rather than being answerable from the notification itself.
+
+## Desktop App
+
+A real native Windows desktop app (`desktop_app/`, built with PySide6/Qt --
+the same language as the rest of this project, not a separate C#/Electron
+stack) sits on top of everything above: three tabs, one window.
+
+```bash
+uv run python -m desktop_app.main
+```
+
+- **Dashboard** -- last-run status at a glance, and a "Check email now"
+  button that runs a live check in the background (the window stays
+  responsive) without needing a terminal at all. When a V2/V3 email needs a
+  real answer, this is where it actually gets answered: a real Qt dialog
+  pops up (a yes/no box for a coverage slot, a text box for an availability
+  statement) instead of sending you back to the CLI. Under the hood this
+  reuses the exact same `ask_user`/`ask_availability` injection points
+  `SchedulerFlow` already had for the CLI's `input()` prompts -- the
+  desktop app just supplies its own Qt-backed versions
+  (`desktop_app/flow_worker.py`), running the check itself on a background
+  `QThread` so a slow live Gmail/LLM call never freezes the window; the
+  thread blocks on a plain `threading.Event` while Qt's signal/slot queue
+  carries the question to the dialog on the main thread and the answer back.
+- **History** -- every past run (scheduled, CLI, or from this app's own
+  "Check email now"), newest first: timestamp, email type, subject,
+  sender, source, and a one-line summary of what happened. Reads a new
+  `outputs/run_history.jsonl` -- one JSON line appended per run
+  (`output_writer.summarize_run`/`append_run_history`) -- gitignored, same
+  reason as `scheduled_run.log`: it can accumulate real email content over
+  time.
+- **Calendar** -- a real month calendar (dates with a committed session
+  highlighted; click a date to see its events) reading
+  `outputs/approved_schedule.json` directly -- the project's own
+  persistent store of actually-committed work (every approved V1 schedule
+  plus every accepted V2 coverage slot), not the transient
+  `outputs/schedule.ics`, which only ever reflects whichever single run
+  last regenerated it.
+
+Nothing about the underlying agent changed to build this -- `main.py`'s own
+setup was pulled out into a shared `build_flow()` so the CLI and the
+desktop app can't drift apart, and both now call the same
+`summarize_run()`/`append_run_history()` after every run.
 
 ## Run
 
@@ -871,6 +924,16 @@ backfill in `validate_schedule` in case a model sends one anyway.
     is the same engineering tradeoff already declined twice before, still
     not revisited, just worked around for the fully-automatable
     workflows.
+18. ~~No way to see run history or the calendar without reading raw JSON/
+    the terminal~~ -- done: see "Desktop App" above. A real PySide6/Qt
+    Windows app (`desktop_app/`) with a Dashboard (status + a "Check email
+    now" button that opens a real dialog for V2/V3 questions instead of
+    the terminal), History (every past run, from a new
+    `outputs/run_history.jsonl`), and Calendar (a month view of
+    `approved_schedule.json`) tab. Reuses `SchedulerFlow`'s existing
+    `ask_user`/`ask_availability` injection points -- the app supplies
+    Qt-dialog versions instead of the CLI's `input()`-based ones, running
+    the check on a background `QThread` so the window never freezes.
 
 ## Course-Style CrewAI Pieces
 

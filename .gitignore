@@ -24,6 +24,9 @@ token.json
 # (scripts/run_scheduled_check.ps1) -- can include real email subjects/
 # senders over time, never a fixed demo artifact.
 outputs/scheduled_run.log
+# Structured per-run history the desktop app's History tab reads -- same
+# real-data-over-time reason as scheduled_run.log above.
+outputs/run_history.jsonl
 # Local Claude Code tooling config, not part of the project itself.
 .claude/
 

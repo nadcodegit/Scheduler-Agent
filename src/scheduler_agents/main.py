@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 from scheduler_agents.flows.scheduler_flow import SchedulerFlow
-from scheduler_agents.output_writer import write_flow_outputs
+from scheduler_agents.output_writer import append_run_history, write_flow_outputs
 from scheduler_agents.tools.gmail_tool import is_live_gmail_enabled
 
 
@@ -40,6 +40,43 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
+
+
+def build_flow(
+    project_root: Path,
+    sample_email: Path | None = None,
+    roster_image: Path | None = None,
+    ask_user=None,
+    ask_availability=None,
+) -> SchedulerFlow:
+    """Shared setup for a SchedulerFlow, used by both this CLI and the
+    desktop app (desktop_app/flow_worker.py) so the two never drift apart --
+    the desktop app just passes its own Qt-dialog-backed ask_user/
+    ask_availability instead of the CLI's input()-based defaults.
+    """
+
+    sample_email = sample_email or project_root / "sample_data" / "sample_schedule_email.txt"
+    roster_image = roster_image or project_root / "sample_data" / "sample_roster.png"
+
+    approved_schedule_path = project_root / "outputs" / "approved_schedule.json"
+    if not approved_schedule_path.exists():
+        # First run: seed from the sample fixture so the coverage-request
+        # demo shows a real conflict warning out of the box. Every run after
+        # that reads/writes this file directly -- this is the one-time
+        # bootstrap, not something later runs repeat.
+        approved_schedule_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(project_root / "sample_data" / "sample_approved_schedule.json", approved_schedule_path)
+
+    return SchedulerFlow(
+        sample_email_path=sample_email,
+        approved_schedule_path=approved_schedule_path,
+        timesheet_pdf_path=project_root / "sample_data" / "sample_purchase_order.pdf",
+        invoice_template_path=project_root / "sample_data" / "invoice_template.docx",
+        invoice_output_dir=project_root / "outputs",
+        roster_image_path=roster_image,
+        ask_user=ask_user,
+        ask_availability=ask_availability,
+    )
 
 
 def _describe_email_source(state, gmail_enabled: bool, sample_email: Path) -> str:
@@ -71,28 +108,13 @@ def main() -> None:
     if not sample_email.is_absolute():
         sample_email = project_root / "sample_data" / sample_email
 
-    approved_schedule_path = project_root / "outputs" / "approved_schedule.json"
-    if not approved_schedule_path.exists():
-        # First run: seed from the sample fixture so the coverage-request
-        # demo shows a real conflict warning out of the box. Every run after
-        # that reads/writes this file directly -- this is the one-time
-        # bootstrap, not something later runs repeat.
-        approved_schedule_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(project_root / "sample_data" / "sample_approved_schedule.json", approved_schedule_path)
+    roster_image = Path(args.roster_image) if args.roster_image else None
     timesheet_pdf = project_root / "sample_data" / "sample_purchase_order.pdf"
-    invoice_template = project_root / "sample_data" / "invoice_template.docx"
-    roster_image = Path(args.roster_image) if args.roster_image else project_root / "sample_data" / "sample_roster.png"
-    flow = SchedulerFlow(
-        sample_email_path=sample_email,
-        approved_schedule_path=approved_schedule_path,
-        timesheet_pdf_path=timesheet_pdf,
-        invoice_template_path=invoice_template,
-        invoice_output_dir=project_root / "outputs",
-        roster_image_path=roster_image,
-    )
+    flow = build_flow(project_root, sample_email=sample_email, roster_image=roster_image)
     state = asyncio.run(flow.run_v1_async())
     print(f"Email source: {_describe_email_source(state, is_live_gmail_enabled(), sample_email)}")
     output_paths = write_flow_outputs(state, project_root / "outputs")
+    append_run_history(state, project_root / "outputs")
 
     print(f"Run id: {state.run_id}")
     if state.email is not None:
