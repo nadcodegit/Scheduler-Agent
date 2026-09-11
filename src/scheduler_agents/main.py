@@ -92,18 +92,28 @@ def main() -> None:
             print(event)
     elif state.email_type == "coverage_request":
         print(f"Coverage slots found: {len(state.coverage_slots)}")
-        for d in state.coverage_decisions:
-            print(f"  {d.slot.date} {d.slot.start_time}-{d.slot.end_time}: {d.decision} (conflict={d.conflict})")
-        if state.coverage_unstructured_note:
-            print(f"Unstructured (non-dated) request noted: {state.coverage_unstructured_note}")
-        print(f"Approval required before sending: {state.coverage_approval_required}")
-        print(f"Reply draft:\n{state.coverage_reply_draft}")
-        if state.coverage_gmail_draft_id:
-            print(f"Saved as a real Gmail draft (id={state.coverage_gmail_draft_id}) -- review and send it yourself.")
+        if state.coverage_needs_attention:
+            print("ACTION NEEDED: this coverage request needs you to answer in person --")
+            print("run this command yourself in an interactive terminal to respond:")
+            print("  uv run python -m scheduler_agents.main")
+        else:
+            for d in state.coverage_decisions:
+                print(f"  {d.slot.date} {d.slot.start_time}-{d.slot.end_time}: {d.decision} (conflict={d.conflict})")
+            if state.coverage_unstructured_note:
+                print(f"Unstructured (non-dated) request noted: {state.coverage_unstructured_note}")
+            print(f"Approval required before sending: {state.coverage_approval_required}")
+            print(f"Reply draft:\n{state.coverage_reply_draft}")
+            if state.coverage_gmail_draft_id:
+                print(f"Saved as a real Gmail draft (id={state.coverage_gmail_draft_id}) -- review and send it yourself.")
     elif state.email_type == "availability_request":
         print(f"Requested period: {state.availability_period}")
-        print(f"Approval required before sending: {state.availability_approval_required}")
-        print(f"Reply draft:\n{state.availability_reply_draft}")
+        if state.availability_needs_attention:
+            print("ACTION NEEDED: this availability request needs you to answer in person --")
+            print("run this command yourself in an interactive terminal to respond:")
+            print("  uv run python -m scheduler_agents.main")
+        else:
+            print(f"Approval required before sending: {state.availability_approval_required}")
+            print(f"Reply draft:\n{state.availability_reply_draft}")
     elif state.email_type == "timesheet":
         pdf_source = "LIVE Gmail attachment" if state.live_pdf_attachment_path else f"local file ({timesheet_pdf})"
         print(f"Purchase Order PDF source: {pdf_source}")

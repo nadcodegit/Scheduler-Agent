@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Callable
@@ -72,6 +73,17 @@ _RATE_LIMIT_RETRY_DELAY_SECONDS = 20
 _RATE_LIMIT_MAX_ATTEMPTS = 4
 
 
+class NeedsHumanAttention(Exception):
+    """Raised by the default CLI ask_user/ask_availability implementations
+    when there's no interactive terminal to actually prompt -- e.g. a
+    scheduled/unattended run (Windows Task Scheduler has no console attached
+    to answer input()). Calling input() in that situation either crashes
+    with EOFError or hangs forever; neither is acceptable for something
+    running unattended. Callers catch this and flag the email for the human
+    to handle later, rather than crashing the whole run or -- worse --
+    silently guessing an answer they never actually gave."""
+
+
 def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
     """Default human-in-the-loop prompt: ask directly in the terminal.
 
@@ -85,6 +97,9 @@ def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
         print("Conflict: yes -- this overlaps something already on your approved schedule.")
     else:
         print("Conflict: no.")
+    if not sys.stdin.isatty():
+        print("(no interactive terminal attached -- flagging for your attention instead of guessing)")
+        raise NeedsHumanAttention("coverage decision needs a human, but stdin isn't interactive")
     answer = input("Can you cover this shift? (y/n): ").strip().lower()
     return answer in {"y", "yes"}
 
@@ -98,6 +113,9 @@ def ask_availability_via_cli(period: str | None) -> str:
     """
 
     period_desc = period or "the requested period"
+    if not sys.stdin.isatty():
+        print(f"\nAvailability request for {period_desc} needs a human, but no interactive terminal is attached.")
+        raise NeedsHumanAttention("availability statement needs a human, but stdin isn't interactive")
     return input(f"\nWhat's your availability for {period_desc}? ").strip()
 
 
@@ -381,7 +399,21 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
 
         for slot in slots:
             conflict = has_conflict(slot, busy_events)
-            can_cover = self.ask_user(slot, conflict)
+            try:
+                can_cover = self.ask_user(slot, conflict)
+            except NeedsHumanAttention:
+                # Can't safely draft a reply covering only *some* of the
+                # slots -- stop here, flag the whole email for later, and
+                # leave nothing half-decided. A scheduled/unattended run
+                # should never guess what the human would have answered.
+                self.state.coverage_needs_attention = True
+                record_hook(
+                    self.state,
+                    "coverage_request_needs_attention",
+                    decided_count=len(decisions),
+                    total_slots=len(slots),
+                )
+                return None
             decision = CoverageDecision.ACCEPT if can_cover else CoverageDecision.DECLINE
             decisions.append(CoverageSlotDecision(slot=slot, conflict=conflict, decision=decision))
 
@@ -432,7 +464,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         return self.state.coverage_reply_draft
 
     @listen("availability_request")
-    def handle_availability_request(self) -> str:
+    def handle_availability_request(self) -> str | None:
         """V3: figure out which period is being asked about, ask the human
         to state their availability for it, and draft a reply.
 
@@ -448,7 +480,13 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         period = extract_requested_period(email.body)
         self.state.availability_period = period
 
-        statement = self.ask_availability(period)
+        try:
+            statement = self.ask_availability(period)
+        except NeedsHumanAttention:
+            self.state.availability_needs_attention = True
+            record_hook(self.state, "availability_request_needs_attention", period=period)
+            return None
+
         self.state.availability_statement = statement
         self.state.availability_reply_draft = draft_availability_reply(period, statement)
         self.state.availability_approval_required = True

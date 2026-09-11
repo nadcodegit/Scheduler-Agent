@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-101%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -351,6 +351,9 @@ scheduler-agents/
 │                        contain real personal data)
 ├── evals/
 │   └── run_eval.py
+├── scripts/
+│   ├── run_scheduled_check.ps1  (see "Running unattended" above)
+│   └── run_scheduled_check.cmd
 ├── sample_data/
 │   ├── sample_schedule_email.txt
 │   ├── sample_coverage_request_email.txt
@@ -416,6 +419,7 @@ scheduler-agents/
     ├── test_gmail_workflow.py
     ├── test_ics_tool.py
     ├── test_schedule_store.py
+    ├── test_unattended_mode.py
     └── test_llm_json.py
 ```
 
@@ -532,6 +536,48 @@ needs deleting once for a fresh consent. A live fetch failure (expired
 token, network, or simply nothing matching the query) is logged as a hook
 event and falls back to the sample-file path rather than crashing, same as
 every other external call in this project.
+
+## Running unattended (Windows Task Scheduler)
+
+Every workflow above assumes a human is sitting at the terminal -- V1
+(schedule) and V4 (timesheet) fully self-process either way, but V2
+(coverage) and V3 (availability) always call `input()` to ask a genuine
+question only a human can answer. Running the flow with no interactive
+terminal attached (e.g. a scheduled task) would otherwise crash outright
+with an unhandled `EOFError` the moment it tried to prompt.
+
+`scheduler_flow.py`'s default CLI prompts (`ask_user_can_cover_via_cli`,
+`ask_availability_via_cli`) check `sys.stdin.isatty()` first. With no
+interactive terminal, they raise `NeedsHumanAttention` instead of calling
+`input()`; `handle_coverage_request`/`handle_availability_request` catch
+it, flag the run (`state.coverage_needs_attention` /
+`state.availability_needs_attention`), and return without drafting or
+deciding anything -- never guessing what you'd have answered.
+
+`scripts/run_scheduled_check.ps1` wraps a single run, appending its full
+output (with a timestamp header) to `outputs/scheduled_run.log`
+(gitignored -- can accumulate real email content over time) so there's
+something to check afterward, rather than output going nowhere. Register
+it as a recurring Windows Task Scheduler task (no stored credentials --
+runs as your own already-logged-in user):
+
+```powershell
+schtasks /create /tn "SchedulerAgentsEmailCheck" /tr "C:\path\to\scheduler-agents\scripts\run_scheduled_check.cmd" /sc minute /mo 30 /f
+```
+
+(`run_scheduled_check.cmd` is a one-line trampoline into the `.ps1` --
+`schtasks /tr` doesn't reliably parse a path containing spaces *and* its
+own quoted sub-arguments, a real, well-known quirk with this exact
+project's path since "New project" has a space in it; pointing `/tr`
+directly at a plain file with no arguments sidesteps it entirely.)
+
+V1/V4 emails process fully unattended. For V2/V3, check the log
+periodically and re-run `uv run python -m scheduler_agents.main`
+yourself, interactively, whenever you see an "ACTION NEEDED" line --
+this is a lighter-weight alternative to Next Steps item 3's originally-
+proposed async notification channel (Telegram, etc.): no new
+infrastructure, but the decision still waits for you to come back to a
+real terminal rather than notifying you the moment it's needed.
 
 ## Run
 
@@ -794,6 +840,18 @@ backfill in `validate_schedule` in case a model sends one anyway.
     (still not `gmail.modify` or full mailbox access, and the send
     endpoint is never called) -- still a draft only, a human reviews and
     sends it themselves.
+17. ~~Nothing runs unless a human remembers to open a terminal and run
+    it~~ -- partially done: see "Running unattended" above.
+    `scripts/run_scheduled_check.ps1` + Windows Task Scheduler polls
+    live Gmail periodically; V1/V4 fully self-process, V2/V3 detect the
+    lack of an interactive terminal (`NeedsHumanAttention`, raised from
+    `sys.stdin.isatty()` being false) and flag themselves for later
+    instead of crashing or guessing an answer. Still not the full async
+    "ask now, notify me, resume on my answer" design item 3 originally
+    proposed -- that would need a real notification channel (Telegram,
+    etc.) plus persisted pending-decision state; this is the same
+    engineering tradeoff already declined twice before, still not
+    revisited, just worked around for the fully-automatable workflows.
 
 ## Course-Style CrewAI Pieces
 

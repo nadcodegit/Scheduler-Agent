@@ -133,12 +133,19 @@ class SchedulerFlowState(BaseModel):
     # sample file). None means no draft was created this run -- the reply
     # text above is still available either way, just not in Gmail itself.
     coverage_gmail_draft_id: str | None = None
+    # True when a scheduled/unattended run (no interactive terminal) hit a
+    # coverage decision only a human can make -- extraction still ran and
+    # coverage_slots is populated, but nothing was decided or drafted.
+    coverage_needs_attention: bool = False
 
     # Availability-request workflow (V3)
     availability_period: str | None = None
     availability_statement: str | None = None
     availability_reply_draft: str | None = None
     availability_approval_required: bool = False
+    # Same meaning as coverage_needs_attention above, for the availability
+    # statement this workflow asks the human for.
+    availability_needs_attention: bool = False
 
     # Timesheet/invoice workflow (V4)
     timesheet_data: TimesheetData | None = None

@@ -515,6 +515,12 @@ def test_cli_prompt_states_conflict_status_explicitly_either_way(
 
     slot = CoverageSlot(date="2026-09-10", start_time="14:00", end_time="16:00", language="Persian")
 
+    # ask_user_can_cover_via_cli only calls input() when stdin looks
+    # interactive (see test_scheduler_flow_units.py for that check on its
+    # own) -- pytest's own stdin isn't a real terminal, so this simulates
+    # one to actually exercise the input()-calling branch.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
     monkeypatch.setattr("builtins.input", lambda _: "n")
     ask_user_can_cover_via_cli(slot, conflict=False)
     assert "Conflict: no." in capsys.readouterr().out

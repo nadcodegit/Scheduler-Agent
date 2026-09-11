@@ -20,4 +20,10 @@ outputs/downloaded_roster_image.*
 # credentials.
 credentials.json
 token.json
+# Accumulates real run history from the scheduled/unattended check
+# (scripts/run_scheduled_check.ps1) -- can include real email subjects/
+# senders over time, never a fixed demo artifact.
+outputs/scheduled_run.log
+# Local Claude Code tooling config, not part of the project itself.
+.claude/
 
