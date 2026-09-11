@@ -146,6 +146,8 @@ class SchedulerFlowState(BaseModel):
     # Same meaning as coverage_needs_attention above, for the availability
     # statement this workflow asks the human for.
     availability_needs_attention: bool = False
+    # Same meaning as coverage_gmail_draft_id above.
+    availability_gmail_draft_id: str | None = None
 
     # Timesheet/invoice workflow (V4)
     timesheet_data: TimesheetData | None = None

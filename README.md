@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-101%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-107%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -198,7 +198,9 @@ interpreter's availability for a period (e.g. "your June availability"),
 so unlike V1/V2 there's nothing to extract a decision from -- the flow
 figures out which period is being asked about, asks the human to state
 their availability for it, and drafts the reply. Same rules as V2: always a
-draft, human approves and sends it.
+draft, human approves and sends it, and (when live Gmail is enabled and the
+email came from a real thread) also filed as an actual threaded Gmail draft
+the same way V2's coverage reply is -- still never sent.
 
 ```text
 availability email -> extract period -> ask human for availability -> draft reply (never sent)
@@ -853,7 +855,8 @@ backfill in `validate_schedule` in case a model sends one anyway.
     `threadId`. Required widening the OAuth scope to add `gmail.compose`
     (still not `gmail.modify` or full mailbox access, and the send
     endpoint is never called) -- still a draft only, a human reviews and
-    sends it themselves.
+    sends it themselves. `handle_availability_request` (V3) now does the
+    exact same thing for its own reply, using the same helper.
 17. ~~Nothing runs unless a human remembers to open a terminal and run
     it~~ -- partially done: see "Running unattended" above.
     `scripts/run_scheduled_check.ps1` + Windows Task Scheduler polls

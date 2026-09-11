@@ -132,6 +132,10 @@ def main() -> None:
         else:
             print(f"Approval required before sending: {state.availability_approval_required}")
             print(f"Reply draft:\n{state.availability_reply_draft}")
+            if state.availability_gmail_draft_id:
+                print(
+                    f"Saved as a real Gmail draft (id={state.availability_gmail_draft_id}) -- review and send it yourself."
+                )
     elif state.email_type == "timesheet":
         pdf_source = "LIVE Gmail attachment" if state.live_pdf_attachment_path else f"local file ({timesheet_pdf})"
         print(f"Purchase Order PDF source: {pdf_source}")

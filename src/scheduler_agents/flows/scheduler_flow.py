@@ -491,6 +491,23 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         self.state.availability_reply_draft = draft_availability_reply(period, statement)
         self.state.availability_approval_required = True
 
+        # Same rationale as handle_coverage_request's Gmail draft above --
+        # only for a real live email, still never sends.
+        if is_live_gmail_enabled() and email.thread_id:
+            try:
+                self.state.availability_gmail_draft_id = create_draft_reply(
+                    to=email.sender,
+                    subject=email.subject,
+                    body=self.state.availability_reply_draft,
+                    thread_id=email.thread_id,
+                    in_reply_to=email.rfc_message_id,
+                )
+                record_hook(
+                    self.state, "availability_gmail_draft_created", draft_id=self.state.availability_gmail_draft_id
+                )
+            except Exception as exc:  # never let a Gmail write failure crash the flow
+                record_hook(self.state, "availability_gmail_draft_failed", error=str(exc))
+
         record_hook(self.state, "after_handle_availability_request", period=period)
         return self.state.availability_reply_draft
 
