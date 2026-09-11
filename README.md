@@ -356,6 +356,7 @@ scheduler-agents/
 │   └── run_eval.py
 ├── scripts/
 │   ├── run_scheduled_check.ps1  (see "Running unattended" above)
+│   ├── run_scheduled_check_hidden.vbs  (see "Running unattended" above)
 │   └── launch_desktop_app.cmd  (see "Desktop App" above)
 ├── desktop_app/        (see "Desktop App" above)
 │   ├── main.py
@@ -579,10 +580,12 @@ check, a notification on your desktop is not.
 
 Register it as a recurring Windows Task Scheduler task (no stored
 credentials -- runs as your own already-logged-in user), using
-PowerShell's `ScheduledTasks` module rather than `schtasks.exe` directly:
+PowerShell's `ScheduledTasks` module rather than `schtasks.exe` directly,
+and launching through `scripts/run_scheduled_check_hidden.vbs` rather
+than `powershell.exe` directly:
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument '-ExecutionPolicy Bypass -File "C:\path\to\scheduler-agents\scripts\run_scheduled_check.ps1"'
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument '"C:\path\to\scheduler-agents\scripts\run_scheduled_check_hidden.vbs"'
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 Register-ScheduledTask -TaskName "SchedulerAgentsEmailCheck" -Action $action -Trigger $trigger -Settings $settings
@@ -599,7 +602,19 @@ does -- so the task reports success [`Last Result: 0`] on every trigger
 while silently never actually running anything. Building the action with
 `New-ScheduledTaskAction` sidesteps both problems: it passes `Execute`
 and `Argument` as separate, already-parsed fields, and points straight at
-`powershell.exe` -- a real `.exe`, no file-association resolution needed.)
+a real `.exe`, no file-association resolution needed.
+
+A third problem, found only once actually living with it for a while:
+pointing the action straight at `powershell.exe` makes a real, visible
+console window flash open every single trigger, even though nothing
+prints to it (the script's own output all goes to
+`outputs/scheduled_run.log`, never the console) -- passing
+`-WindowStyle Hidden` to the *top-level* process Task Scheduler launches
+is a well-known unreliable fix; Windows can still flash the window before
+it hides. `run_scheduled_check_hidden.vbs` is the standard, actually-
+reliable workaround: `wscript.exe` itself has no window, and its
+`WScript.Shell.Run(cmd, 0, False)` launches the real PowerShell script
+with window style `0` [`SW_HIDE`] from the start -- never visible at all.)
 
 V1/V4 emails process fully unattended. For V2/V3, check the log
 periodically and re-run `uv run python -m scheduler_agents.main`
