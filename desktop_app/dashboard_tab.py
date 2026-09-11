@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -45,11 +47,17 @@ class DashboardTab(QWidget):
         self.check_button = QPushButton("Check email now")
         self.check_button.clicked.connect(self.run_check)
 
+        self.open_invoice_button = QPushButton("Open invoice")
+        self.open_invoice_button.hide()
+        self.open_invoice_button.clicked.connect(self._open_last_invoice)
+        self._last_invoice_path: str | None = None
+
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
 
         button_row = QHBoxLayout()
         button_row.addWidget(self.check_button)
+        button_row.addWidget(self.open_invoice_button)
         button_row.addStretch(1)
 
         layout = QVBoxLayout(self)
@@ -65,23 +73,36 @@ class DashboardTab(QWidget):
         if not history_path.exists():
             self.status_label.setText("No runs yet -- click \"Check email now\" to run the first one.")
             _set_status_style(self.status_label, "idle")
+            self.open_invoice_button.hide()
             return
 
         lines = history_path.read_text(encoding="utf-8").strip().splitlines()
         if not lines:
             self.status_label.setText("No runs yet -- click \"Check email now\" to run the first one.")
             _set_status_style(self.status_label, "idle")
+            self.open_invoice_button.hide()
             return
 
         last = json.loads(lines[-1])
         needs_attention = bool(last.get("needs_attention"))
         attention = " -- NEEDS YOUR ATTENTION" if needs_attention else " -- all clear"
-        self.status_label.setText(
+        status_text = (
             f"Last checked: {last.get('timestamp', '?')}{attention}\n"
             f"Last email: {last.get('subject') or '(none)'} ({last.get('email_type') or 'n/a'})"
         )
+        invoice_path = last.get("invoice_output_path")
+        if invoice_path:
+            status_text += f"\n✓ Invoice generated: {Path(invoice_path).name}"
+        self.status_label.setText(status_text)
         _set_status_style(self.status_label, "attention" if needs_attention else "ok")
         self.log_view.setPlainText(json.dumps(last, indent=2, ensure_ascii=False))
+
+        self._last_invoice_path = invoice_path
+        self.open_invoice_button.setVisible(bool(invoice_path))
+
+    def _open_last_invoice(self) -> None:
+        if self._last_invoice_path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self._last_invoice_path))
 
     def run_check(self) -> None:
         if self._worker is not None and self._worker.isRunning():
@@ -128,6 +149,16 @@ class DashboardTab(QWidget):
                 "This email needed an answer but no interactive prompt was available. "
                 "Check the History tab and re-run.",
             )
+        elif summary.get("invoice_output_path"):
+            name = Path(summary["invoice_output_path"]).name
+            answer = QMessageBox.information(
+                self,
+                "Invoice generated",
+                f"Done -- created \"{name}\".\n\nOpen it now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self._open_last_invoice()
 
     def _handle_failed(self, error: str) -> None:
         self.check_button.setEnabled(True)

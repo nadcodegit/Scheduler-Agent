@@ -67,7 +67,11 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
                 "draft": state.availability_reply_draft,
             }
     elif email_type == "timesheet":
-        summary = "Invoice generated." if state.invoice_output_path else "Purchase Order could not be parsed."
+        summary = (
+            f"Invoice generated: {Path(state.invoice_output_path).name}"
+            if state.invoice_output_path
+            else "Purchase Order could not be parsed."
+        )
     else:
         summary = "No action needed."
 
@@ -81,6 +85,7 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
         "fetch_error": fetch_error,
         "needs_attention": needs_attention,
         "gmail_draft_id": gmail_draft_id,
+        "invoice_output_path": state.invoice_output_path if email_type == "timesheet" else None,
         "summary": summary,
         "conversation": conversation,
     }

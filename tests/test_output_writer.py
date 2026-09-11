@@ -135,6 +135,23 @@ def test_summarize_run_conversation_is_none_for_schedule_and_needs_attention():
     assert summarize_run(attention_state)["conversation"] is None
 
 
+def test_summarize_run_includes_invoice_path_and_filename_in_summary():
+    state = _state_with_email(EmailType.TIMESHEET)
+    state.invoice_output_path = "C:\\outputs\\INVOICE September 2026.docx"
+
+    summary = summarize_run(state)
+
+    assert summary["invoice_output_path"] == "C:\\outputs\\INVOICE September 2026.docx"
+    assert summary["summary"] == "Invoice generated: INVOICE September 2026.docx"
+
+
+def test_summarize_run_invoice_path_is_none_for_other_email_types():
+    state = _state_with_email(EmailType.SCHEDULE)
+    summary = summarize_run(state)
+
+    assert summary["invoice_output_path"] is None
+
+
 def test_append_run_history_writes_one_json_line_per_call(tmp_path: Path):
     state1 = _state_with_email(EmailType.SCHEDULE, subject="first")
     state2 = _state_with_email(EmailType.SCHEDULE, subject="second")
