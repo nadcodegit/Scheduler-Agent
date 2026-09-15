@@ -152,9 +152,15 @@ def test_summarize_run_invoice_path_is_none_for_other_email_types():
     assert summary["invoice_output_path"] is None
 
 
+def _gmail_state(email_type: EmailType, subject: str = "s", sender: str = "a@glocco.com") -> SchedulerFlowState:
+    state = _state_with_email(email_type, subject=subject, sender=sender)
+    record_hook(state, "after_receive_email", subject=subject, sender=sender, source="gmail")
+    return state
+
+
 def test_append_run_history_writes_one_json_line_per_call(tmp_path: Path):
-    state1 = _state_with_email(EmailType.SCHEDULE, subject="first")
-    state2 = _state_with_email(EmailType.SCHEDULE, subject="second")
+    state1 = _gmail_state(EmailType.SCHEDULE, subject="first")
+    state2 = _gmail_state(EmailType.SCHEDULE, subject="second")
 
     append_run_history(state1, tmp_path)
     history_path = append_run_history(state2, tmp_path)
@@ -163,3 +169,29 @@ def test_append_run_history_writes_one_json_line_per_call(tmp_path: Path):
     assert len(lines) == 2
     assert json.loads(lines[0])["subject"] == "first"
     assert json.loads(lines[1])["subject"] == "second"
+
+
+def test_append_run_history_skips_a_sample_fallback_run(tmp_path: Path):
+    """A scheduled check that finds nothing new falls back to the offline
+    sample fixture -- that shouldn't be recorded as if it were real
+    activity (it would bury genuine history under noise and show
+    scheduler@example.com instead of a real address)."""
+
+    state = _state_with_email(EmailType.SCHEDULE)  # no "gmail" hook -> source stays "unknown"
+
+    result = append_run_history(state, tmp_path)
+
+    assert result is None
+    assert not (tmp_path / "run_history.jsonl").exists()
+
+
+def test_append_run_history_records_a_real_run_after_skipping_a_sample_one(tmp_path: Path):
+    skipped_state = _state_with_email(EmailType.SCHEDULE)
+    real_state = _gmail_state(EmailType.SCHEDULE, subject="real")
+
+    append_run_history(skipped_state, tmp_path)
+    history_path = append_run_history(real_state, tmp_path)
+
+    lines = history_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["subject"] == "real"

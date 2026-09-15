@@ -35,10 +35,10 @@ class MainWindow(QWidget):
         header_layout.addWidget(title)
         header_layout.addWidget(subtitle)
 
-        self.history_tab = HistoryTab(project_root)
         self.calendar_tab = CalendarTab(project_root)
         self.conversations_tab = ConversationsTab(project_root)
         self.dashboard_tab = DashboardTab(project_root, on_run_finished=self._refresh_other_tabs)
+        self.history_tab = HistoryTab(project_root, on_cleared=self._refresh_after_history_cleared)
 
         tabs = QTabWidget()
         tabs.addTab(self.dashboard_tab, "Dashboard")
@@ -53,4 +53,8 @@ class MainWindow(QWidget):
     def _refresh_other_tabs(self) -> None:
         self.history_tab.refresh()
         self.calendar_tab.refresh()
+        self.conversations_tab.refresh()
+
+    def _refresh_after_history_cleared(self) -> None:
+        self.dashboard_tab.refresh_status()
         self.conversations_tab.refresh()

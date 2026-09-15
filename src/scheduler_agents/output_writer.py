@@ -91,17 +91,30 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
     }
 
 
-def append_run_history(state: SchedulerFlowState, output_dir: Path) -> Path:
+def append_run_history(state: SchedulerFlowState, output_dir: Path) -> Path | None:
     """Appends one summarize_run() record as a line to outputs/run_history.jsonl
     -- JSON Lines rather than a single JSON array so each run is a plain
     atomic append, no read-modify-write of a growing file needed. Gitignored:
     like scheduled_run.log, this accumulates real email content over time.
+
+    Skips writing when the run never touched a real email (source != "gmail"
+    -- live Gmail was enabled but found nothing new this cycle, so
+    receive_email() fell back to the offline sample fixture). A 30-minute
+    scheduled check finds nothing new far more often than not; logging that
+    every time buried real activity under noise and made the History tab
+    show the sample fixture's scheduler@example.com instead of a real
+    address. Returns None when skipped so callers can tell nothing was
+    recorded.
     """
+
+    summary = summarize_run(state)
+    if summary["source"] != "gmail":
+        return None
 
     output_dir.mkdir(parents=True, exist_ok=True)
     history_path = output_dir / "run_history.jsonl"
     with history_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(summarize_run(state), ensure_ascii=False))
+        handle.write(json.dumps(summary, ensure_ascii=False))
         handle.write("\n")
     return history_path
 

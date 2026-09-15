@@ -87,8 +87,9 @@ class DashboardTab(QWidget):
         needs_attention = bool(last.get("needs_attention"))
         attention = " -- NEEDS YOUR ATTENTION" if needs_attention else " -- all clear"
         status_text = (
-            f"Last checked: {last.get('timestamp', '?')}{attention}\n"
-            f"Last email: {last.get('subject') or '(none)'} ({last.get('email_type') or 'n/a'})"
+            f"Last real activity: {last.get('timestamp', '?')}{attention}\n"
+            f"Email: {last.get('subject') or '(none)'} ({last.get('email_type') or 'n/a'}) "
+            f"from {last.get('sender') or 'n/a'}"
         )
         invoice_path = last.get("invoice_output_path")
         if invoice_path:
@@ -140,6 +141,15 @@ class DashboardTab(QWidget):
 
     def _handle_finished(self, summary: dict) -> None:
         self.check_button.setEnabled(True)
+        if summary.get("source") != "gmail":
+            # Nothing was written to history (append_run_history skips a
+            # sample-fallback run on purpose -- see its docstring), so
+            # refresh_status() would just redisplay the last real entry
+            # with no sign a check happened at all. Give real-time feedback
+            # from the signal itself instead, without touching History/Calendar.
+            self.status_label.setText("Just checked -- no new email found.")
+            _set_status_style(self.status_label, "idle")
+            return
         self.refresh_status()
         self._on_run_finished()
         if summary.get("needs_attention"):

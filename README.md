@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-127%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -660,14 +660,20 @@ from Explorer ("Send to > Desktop (create shortcut)").
   availability records in `run_history.jsonl` -- schedule/timesheet runs
   and any run that hit `needs_attention` without an answer have no
   conversation to show.
-- **History** -- every past run (scheduled, CLI, or from this app's own
-  "Check email now"), newest first: timestamp, email type, subject,
-  sender, source, and a one-line summary of what happened, rows tinted
-  green/red by whether they needed attention. Reads the same
+- **History** -- every past run that actually touched a real email
+  (scheduled, CLI, or from this app's own "Check email now"), newest
+  first: timestamp, email type, subject, sender, source, and a one-line
+  summary of what happened, rows tinted green/red by whether they needed
+  attention. A "Clear history" button wipes it once it's grown large. Reads
   `outputs/run_history.jsonl` -- one JSON line appended per run
   (`output_writer.summarize_run`/`append_run_history`) -- gitignored, same
   reason as `scheduled_run.log`: it can accumulate real email content over
-  time.
+  time. `append_run_history` deliberately skips a run whose live-Gmail
+  fetch found nothing new and fell back to the offline sample fixture --
+  a 30-minute scheduled check finds nothing new far more often than not,
+  and logging that every time buried real activity under noise (and made
+  the tab show the sample fixture's `scheduler@example.com` instead of a
+  real address).
 - **Calendar** -- a real month calendar (dates with a committed session
   highlighted; click a date to see its events) reading
   `outputs/approved_schedule.json` directly -- the project's own

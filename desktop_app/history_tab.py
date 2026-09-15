@@ -4,7 +4,16 @@ import json
 from pathlib import Path
 
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHeaderView, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QHeaderView,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 COLUMNS = ["Timestamp", "Type", "Subject", "Sender", "Source", "Summary"]
 ATTENTION_BG = QColor("#fbe4e4")
@@ -16,9 +25,10 @@ class HistoryTab(QWidget):
     the same structured record main.py/flow_worker.py append to after every
     run (scheduled, CLI, or from this app's own "Check email now" button)."""
 
-    def __init__(self, project_root: Path, parent=None):
+    def __init__(self, project_root: Path, on_cleared=None, parent=None):
         super().__init__(parent)
         self.project_root = project_root
+        self._on_cleared = on_cleared
 
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
@@ -28,11 +38,34 @@ class HistoryTab(QWidget):
         refresh_button = QPushButton("Refresh")
         refresh_button.clicked.connect(self.refresh)
 
+        clear_button = QPushButton("Clear history")
+        clear_button.clicked.connect(self._clear_history)
+
+        button_row = QHBoxLayout()
+        button_row.addWidget(refresh_button)
+        button_row.addWidget(clear_button)
+        button_row.addStretch(1)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(refresh_button)
+        layout.addLayout(button_row)
         layout.addWidget(self.table)
 
         self.refresh()
+
+    def _clear_history(self) -> None:
+        history_path = self.project_root / "outputs" / "run_history.jsonl"
+        if not history_path.exists():
+            return
+        answer = QMessageBox.question(
+            self,
+            "Clear history",
+            "Delete every entry in the History tab? This can't be undone.",
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            history_path.unlink()
+            self.refresh()
+            if self._on_cleared:
+                self._on_cleared()
 
     def refresh(self) -> None:
         history_path = self.project_root / "outputs" / "run_history.jsonl"
