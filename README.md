@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-127%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-131%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -267,8 +267,10 @@ extract or validate; `validate_schedule_events` has no language check at
 all as a result.
 
 ```text
-roster screenshot -> vision LLM -> events + timezone label -> deterministic guardrail -> calendar (or blocked + approval)
+roster screenshot -> vision LLM -> events + timezone label -> human confirmation -> deterministic guardrail -> calendar (or blocked + approval)
 ```
+
+**Vision-extracted events always get a human confirmation before anything is saved, on top of the deterministic guardrail.** Real testing against a real October roster found the vision model genuinely, non-deterministically wrong at reading a dense grid -- confidently misreading which hour column a mark fell under, differently between identical back-to-back calls, always still valid-looking JSON that sails straight through the structural guardrail. There's no cheap deterministic check for "does this actually match the image," so -- same principle as V2/V3's human-in-the-loop -- `confirm_roster_events` (same `NeedsHumanAttention` pattern as `ask_user`/`ask_availability`) always asks before saving: the CLI prints the extracted events and the image path to compare side by side; the desktop app opens the real image and shows a Yes/No dialog. A scheduled/unattended run flags itself for attention instead of guessing.
 
 **Live Gmail image ingestion added later, with two real bugs found the same way every other bug in this project was found -- live testing.** `gmail_tool.py` originally only downloaded PDF attachments (V4); a real `schedule` email with the actual roster as an *embedded image* always silently fell through to the static demo fixture instead, producing the wrong month's data. Fixed by downloading the message's embedded image the same way, with two rounds of live verification:
 
@@ -644,8 +646,11 @@ from Explorer ("Send to > Desktop (create shortcut)").
   responsive) without needing a terminal at all. When a V2/V3 email needs a
   real answer, this is where it actually gets answered: a real Qt dialog
   pops up (a yes/no box for a coverage slot, a text box for an availability
-  statement) instead of sending you back to the CLI. Under the hood this
-  reuses the exact same `ask_user`/`ask_availability` injection points
+  statement) instead of sending you back to the CLI. Same treatment for a
+  vision-extracted roster (V1/V5): the dialog opens the real source image
+  on screen and asks a real yes/no -- does this actually match? -- before
+  anything from it is saved. Under the hood this reuses the exact same
+  `ask_user`/`ask_availability`/`confirm_roster_events` injection points
   `SchedulerFlow` already had for the CLI's `input()` prompts -- the
   desktop app just supplies its own Qt-backed versions
   (`desktop_app/flow_worker.py`), running the check itself on a background
@@ -973,6 +978,23 @@ backfill in `validate_schedule` in case a model sends one anyway.
     `ask_user`/`ask_availability` injection points -- the app supplies
     Qt-dialog versions instead of the CLI's `input()`-based ones, running
     the check on a background `QThread` so the window never freezes.
+19. ~~A real October schedule was processed but nothing landed on the
+    calendar~~ -- traced to two independent real bugs on the same live
+    email: (1) Groq retired the vision model this project used
+    (`qwen/qwen3.6-27b` -> `qwen/qwen3.8-27b`, see the Groq-model-retirement
+    note above -- vision models get retired too, not just text ones), and
+    once that was fixed, (2) the vision model itself proved unreliable at
+    reading the roster's grid, confidently wrong and non-deterministic
+    between calls -- addressed with the human-confirmation gate described
+    above, not by chasing more prompt tweaks with diminishing returns. A
+    third, separate bug surfaced in the same investigation: the schedule
+    *extraction* prompt (unlike the classification one) had no guidance
+    about quoted reply-thread history, so it pulled her own earlier
+    availability reply ("available 7-11am") out of the quoted thread and
+    invented 31 daily calendar rows from it. Hardened
+    `extraction_tasks.yaml` the same way `classify_tasks.yaml` was already
+    hardened: ignore quoted history, don't turn an availability statement
+    into dated rows, prefer an empty result over inventing one.
 
 ## Course-Style CrewAI Pieces
 
