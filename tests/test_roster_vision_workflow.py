@@ -158,7 +158,7 @@ def test_parse_roster_image_falls_back_to_next_provider_on_failure(
 
     events, timezone_label = parse_roster_image(fake_image)
 
-    assert calls == ["groq/qwen/qwen3.6-27b", "gpt-4o-mini"]  # tried Groq first, fell back to OpenAI
+    assert calls == ["groq/qwen/qwen3.8-27b", "gpt-4o-mini"]  # tried Groq first, fell back to OpenAI
     assert timezone_label == "UK"
     assert len(events) == 1
 

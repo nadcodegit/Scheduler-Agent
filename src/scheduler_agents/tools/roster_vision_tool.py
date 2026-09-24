@@ -30,7 +30,7 @@ from scheduler_agents.tools.llm_json import strip_code_fence
 # no parseable text, so the fallback has to be across vision providers
 # instead.
 _VISION_MODEL_CANDIDATES: list[tuple[str, str]] = [
-    ("GROQ_API_KEY", "groq/qwen/qwen3.6-27b"),
+    ("GROQ_API_KEY", "groq/qwen/qwen3.8-27b"),
     ("OPENAI_API_KEY", "gpt-4o-mini"),
     ("GEMINI_API_KEY", "gemini/gemini-3.6-flash"),
 ]
@@ -121,13 +121,6 @@ def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str, api_k
             }
         ],
     }
-    if model.startswith("groq/"):
-        # Qwen3.6 thinks-out-loud in <think> tags by default, which breaks
-        # naive JSON parsing; this model still answers correctly with
-        # reasoning off, so there's no accuracy tradeoff here. Not a
-        # recognized param for the other candidates, so only sent to Groq.
-        kwargs["reasoning_effort"] = "none"
-
     response = litellm.completion(**kwargs)
     raw = response.choices[0].message.content
     return json.loads(strip_code_fence(raw))
@@ -154,6 +147,14 @@ def parse_roster_image(path: Path) -> tuple[list[ScheduleEvent], str | None]:
 
     data: dict[str, Any] | None = None
     last_error: Exception | None = None
+    # One entry per provider actually tried, not just the last one -- a
+    # provider that fails outright (wrong model id, unsupported param, bad
+    # auth) used to have its real error silently discarded the moment a
+    # later provider was tried too, leaving only whichever provider failed
+    # last in the final message. That cost real debugging time once: Groq
+    # was failing on a retired model id, but the surfaced error was only
+    # Gemini's unrelated auth failure, since Gemini was tried last.
+    errors_by_provider: list[str] = []
     for env_var, model in configured:
         for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
             try:
@@ -162,16 +163,19 @@ def parse_roster_image(path: Path) -> tuple[list[ScheduleEvent], str | None]:
             except litellm.RateLimitError as exc:
                 last_error = exc
                 if attempt == _RATE_LIMIT_MAX_ATTEMPTS:
+                    errors_by_provider.append(f"{model}: {exc}")
                     break
                 time.sleep(_RATE_LIMIT_RETRY_DELAY_SECONDS)
             except Exception as exc:  # try the next configured provider rather than giving up
                 last_error = exc
+                errors_by_provider.append(f"{model}: {exc}")
                 break
         if data is not None:
             break
 
     if data is None:
-        raise RuntimeError(f"All configured vision providers failed; last error: {last_error}") from last_error
+        details = "; ".join(errors_by_provider)
+        raise RuntimeError(f"All configured vision providers failed -- {details}") from last_error
 
     events: list[ScheduleEvent] = []
     for item in data.get("events", []):
