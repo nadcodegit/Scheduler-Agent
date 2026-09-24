@@ -28,6 +28,7 @@ class FlowWorker(QThread):
 
     ask_coverage = Signal(object, bool)
     ask_availability = Signal(object)
+    ask_confirm_roster = Signal(object, object)
     finished_ok = Signal(dict)
     failed = Signal(str)
 
@@ -37,6 +38,7 @@ class FlowWorker(QThread):
         self._answer_event = threading.Event()
         self._coverage_answer: bool = False
         self._availability_answer: str = ""
+        self._roster_confirm_answer: bool = False
 
     def provide_coverage_answer(self, can_cover: bool) -> None:
         self._coverage_answer = can_cover
@@ -44,6 +46,10 @@ class FlowWorker(QThread):
 
     def provide_availability_answer(self, statement: str) -> None:
         self._availability_answer = statement
+        self._answer_event.set()
+
+    def provide_roster_confirm_answer(self, matches: bool) -> None:
+        self._roster_confirm_answer = matches
         self._answer_event.set()
 
     def _ask_user(self, slot, conflict: bool) -> bool:
@@ -58,12 +64,19 @@ class FlowWorker(QThread):
         self._answer_event.wait()
         return self._availability_answer
 
+    def _confirm_roster_events(self, events, roster_image_path) -> bool:
+        self._answer_event.clear()
+        self.ask_confirm_roster.emit(events, roster_image_path)
+        self._answer_event.wait()
+        return self._roster_confirm_answer
+
     def run(self) -> None:
         try:
             flow = build_flow(
                 self.project_root,
                 ask_user=self._ask_user,
                 ask_availability=self._ask_availability,
+                confirm_roster_events=self._confirm_roster_events,
             )
             state = asyncio.run(flow.run_v1_async())
             write_flow_outputs(state, self.project_root / "outputs")

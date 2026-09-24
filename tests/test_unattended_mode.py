@@ -10,8 +10,9 @@ from scheduler_agents.flows.scheduler_flow import (
     SchedulerFlow,
     ask_availability_via_cli,
     ask_user_can_cover_via_cli,
+    confirm_roster_events_via_cli,
 )
-from scheduler_agents.models.state import CoverageSlot
+from scheduler_agents.models.state import CoverageSlot, ScheduleEvent
 
 SAMPLE_DATA = Path(__file__).resolve().parents[1] / "sample_data"
 
@@ -31,6 +32,13 @@ def test_ask_user_can_cover_via_cli_raises_without_a_terminal():
 def test_ask_availability_via_cli_raises_without_a_terminal():
     with pytest.raises(NeedsHumanAttention):
         ask_availability_via_cli("June")
+
+
+def test_confirm_roster_events_via_cli_raises_without_a_terminal():
+    events = [ScheduleEvent(date="2026-10-01", start_time="09:00", end_time="10:00", source="roster_image")]
+
+    with pytest.raises(NeedsHumanAttention):
+        confirm_roster_events_via_cli(events, None)
 
 
 def test_coverage_request_flags_needs_attention_instead_of_crashing(monkeypatch: pytest.MonkeyPatch):

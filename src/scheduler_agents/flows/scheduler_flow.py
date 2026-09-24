@@ -100,7 +100,15 @@ def ask_user_can_cover_via_cli(slot: CoverageSlot, conflict: bool) -> bool:
     if not sys.stdin.isatty():
         print("(no interactive terminal attached -- flagging for your attention instead of guessing)")
         raise NeedsHumanAttention("coverage decision needs a human, but stdin isn't interactive")
-    answer = input("Can you cover this shift? (y/n): ").strip().lower()
+    try:
+        answer = input("Can you cover this shift? (y/n): ").strip().lower()
+    except EOFError:
+        # isatty() can say True while the stream still has nothing to give
+        # (seen for real: a non-interactive runner whose stdin nonetheless
+        # reports as a tty) -- input() then raises EOFError instead of
+        # ever returning, which must not be allowed to crash the flow.
+        print("(stdin closed before an answer came in -- flagging for your attention instead of guessing)")
+        raise NeedsHumanAttention("coverage decision needs a human, but stdin hit EOF") from None
     return answer in {"y", "yes"}
 
 
@@ -116,7 +124,44 @@ def ask_availability_via_cli(period: str | None) -> str:
     if not sys.stdin.isatty():
         print(f"\nAvailability request for {period_desc} needs a human, but no interactive terminal is attached.")
         raise NeedsHumanAttention("availability statement needs a human, but stdin isn't interactive")
-    return input(f"\nWhat's your availability for {period_desc}? ").strip()
+    try:
+        return input(f"\nWhat's your availability for {period_desc}? ").strip()
+    except EOFError:
+        # Same isatty()-lies-sometimes case as ask_user_can_cover_via_cli.
+        print("(stdin closed before an answer came in -- flagging for your attention instead of guessing)")
+        raise NeedsHumanAttention("availability statement needs a human, but stdin hit EOF") from None
+
+
+def confirm_roster_events_via_cli(events: list[ScheduleEvent], roster_image_path: Path | None) -> bool:
+    """Default human-in-the-loop confirmation for vision-extracted roster
+    events, before anything from them is saved to the approved schedule.
+
+    Real testing found the vision model reading a roster screenshot's grid
+    can be genuinely, non-deterministically wrong -- confidently misreading
+    which hour column a mark falls under, differently between identical
+    back-to-back calls, with no signal in the output that anything is off
+    (it's still valid JSON, still passes the structural guardrail). Unlike
+    the LLM/regex text paths, there's no cheap deterministic check that can
+    catch a plausible-looking but wrong grid read, so -- same principle as
+    ask_user/ask_availability -- a human always confirms before this data
+    becomes a real calendar commitment, rather than trusting it silently.
+    """
+
+    print(f"\nExtracted {len(events)} event(s) from a roster screenshot:")
+    for event in sorted(events, key=lambda e: (e.date, e.start_time)):
+        print(f"  {event.date} {event.start_time}-{event.end_time}")
+    if roster_image_path:
+        print(f"\nCompare against the actual image before confirming: {roster_image_path}")
+    if not sys.stdin.isatty():
+        print("(no interactive terminal attached -- flagging for your attention instead of guessing)")
+        raise NeedsHumanAttention("roster extraction needs a human to confirm, but stdin isn't interactive")
+    try:
+        answer = input("Does this match the real roster? (y/n): ").strip().lower()
+    except EOFError:
+        # Same isatty()-lies-sometimes case as ask_user_can_cover_via_cli.
+        print("(stdin closed before an answer came in -- flagging for your attention instead of guessing)")
+        raise NeedsHumanAttention("roster confirmation needs a human, but stdin hit EOF") from None
+    return answer in {"y", "yes"}
 
 
 class SchedulerFlow(Flow[SchedulerFlowState]):
@@ -129,6 +174,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         approved_schedule_path: str | Path | None = None,
         ask_user: Callable[[CoverageSlot, bool], bool] | None = None,
         ask_availability: Callable[[str | None], str] | None = None,
+        confirm_roster_events: Callable[[list[ScheduleEvent], Path | None], bool] | None = None,
         timesheet_pdf_path: str | Path | None = None,
         invoice_template_path: str | Path | None = None,
         invoice_output_dir: str | Path | None = None,
@@ -144,6 +190,7 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
         self.approved_schedule_path = Path(approved_schedule_path) if approved_schedule_path else None
         self.ask_user = ask_user or ask_user_can_cover_via_cli
         self.ask_availability = ask_availability or ask_availability_via_cli
+        self.confirm_roster_events = confirm_roster_events or confirm_roster_events_via_cli
         self.timesheet_pdf_path = Path(timesheet_pdf_path) if timesheet_pdf_path else None
         self.invoice_template_path = Path(invoice_template_path) if invoice_template_path else None
         self.invoice_output_dir = Path(invoice_output_dir) if invoice_output_dir else None
@@ -268,6 +315,23 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                 )
             except Exception as exc:  # network/vision-model failures never crash the flow
                 record_hook(self.state, "roster_image_parse_failed", error=str(exc))
+
+            # Vision-extracted events, specifically, always get a human
+            # confirmation before anything downstream can save them -- see
+            # confirm_roster_events_via_cli's docstring for why: a confident
+            # but wrong grid read is otherwise indistinguishable from a
+            # correct one to every check this flow can run on its own.
+            if events:
+                try:
+                    confirmed = self.confirm_roster_events(events, roster_image_path)
+                except NeedsHumanAttention:
+                    confirmed = False
+                    self.state.schedule_needs_attention = True
+                    record_hook(self.state, "roster_events_need_attention", event_count=len(events))
+                if not confirmed:
+                    if not self.state.schedule_needs_attention:
+                        record_hook(self.state, "roster_events_rejected", event_count=len(events))
+                    events = []
 
         self.state.extracted_events = events
         record_hook(self.state, "after_parse_schedule", event_count=len(self.state.extracted_events))

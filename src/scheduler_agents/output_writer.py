@@ -27,7 +27,9 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
             fetch_error = str(event.details.get("error"))
 
     email_type = str(state.email_type) if state.email_type else None
-    needs_attention = state.coverage_needs_attention or state.availability_needs_attention
+    needs_attention = (
+        state.coverage_needs_attention or state.availability_needs_attention or state.schedule_needs_attention
+    )
     gmail_draft_id = state.coverage_gmail_draft_id or state.availability_gmail_draft_id
 
     conversation: dict[str, Any] | None = None

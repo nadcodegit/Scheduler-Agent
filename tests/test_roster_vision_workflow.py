@@ -203,7 +203,11 @@ def test_scheduler_flow_falls_back_to_roster_image_when_body_has_no_dates(
         "scheduler_agents.flows.scheduler_flow.parse_roster_image", fake_parse_roster_image
     )
 
-    flow = SchedulerFlow(sample_email_path=email_path, roster_image_path=fake_image)
+    flow = SchedulerFlow(
+        sample_email_path=email_path,
+        roster_image_path=fake_image,
+        confirm_roster_events=lambda events, path: True,
+    )
     state = asyncio.run(flow.run_v1_async())
 
     assert state.email_type == "schedule"
@@ -244,7 +248,11 @@ def test_scheduler_flow_uses_roster_timezone_for_calendar_events(
         "scheduler_agents.flows.scheduler_flow.parse_roster_image", fake_parse_roster_image
     )
 
-    flow = SchedulerFlow(sample_email_path=email_path, roster_image_path=fake_image)
+    flow = SchedulerFlow(
+        sample_email_path=email_path,
+        roster_image_path=fake_image,
+        confirm_roster_events=lambda events, path: True,
+    )
     state = asyncio.run(flow.run_v1_async())
 
     assert state.validation_errors == []
@@ -285,7 +293,11 @@ def test_scheduler_flow_defaults_missing_language_from_user_memory(
         "scheduler_agents.flows.scheduler_flow.parse_roster_image", fake_parse_roster_image
     )
 
-    flow = SchedulerFlow(sample_email_path=email_path, roster_image_path=fake_image)
+    flow = SchedulerFlow(
+        sample_email_path=email_path,
+        roster_image_path=fake_image,
+        confirm_roster_events=lambda events, path: True,
+    )
     state = asyncio.run(flow.run_v1_async())
 
     assert state.validation_errors == []
@@ -326,7 +338,127 @@ def test_missing_language_default_reads_from_user_memory_not_hardcoded(
         sample_email_path=email_path,
         roster_image_path=fake_image,
         memory=UserMemory(default_language="French"),
+        confirm_roster_events=lambda events, path: True,
     )
     state = asyncio.run(flow.run_v1_async())
 
     assert state.extracted_events[0].language == "French"
+
+
+def _schedule_email(tmp_path: Path) -> Path:
+    email_path = tmp_path / "roster_email.txt"
+    email_path.write_text(
+        "Subject: October Roster\nFrom: scheduler@example.com\n\nPlease review the attached roster.\n",
+        encoding="utf-8",
+    )
+    return email_path
+
+
+def test_confirm_roster_events_is_called_with_the_extracted_events_and_image_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Real testing found the vision model can confidently misread a
+    roster's grid -- a human always confirms before any of it is saved.
+    This is that confirmation gate actually firing, with the real
+    extracted events and the real image path so she can compare."""
+
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+    fake_events = [ScheduleEvent(date="2026-10-01", start_time="09:00", end_time="10:00", source="roster_image")]
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.parse_roster_image",
+        lambda path: (fake_events, "UK"),
+    )
+
+    seen: dict = {}
+
+    def fake_confirm(events, image_path):
+        seen["events"] = events
+        seen["image_path"] = image_path
+        return True
+
+    flow = SchedulerFlow(
+        sample_email_path=_schedule_email(tmp_path),
+        roster_image_path=fake_image,
+        confirm_roster_events=fake_confirm,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert seen["events"] == fake_events
+    assert seen["image_path"] == fake_image
+    assert len(state.extracted_events) == 1
+
+
+def test_rejecting_roster_events_discards_them_without_saving_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A human saying "no, that's wrong" must behave like extraction found
+    nothing -- not like a validation failure on real data, and definitely
+    not save anything to the calendar."""
+
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.parse_roster_image",
+        lambda path: (
+            [ScheduleEvent(date="2026-10-01", start_time="09:00", end_time="10:00", source="roster_image")],
+            "UK",
+        ),
+    )
+
+    flow = SchedulerFlow(
+        sample_email_path=_schedule_email(tmp_path),
+        roster_image_path=fake_image,
+        confirm_roster_events=lambda events, path: False,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.extracted_events == []
+    assert state.calendar_events == []
+    assert state.schedule_needs_attention is False  # a real "no", not an unattended run
+
+
+def test_roster_confirmation_flags_needs_attention_when_unattended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Same NeedsHumanAttention pattern as V2/V3: a scheduled/unattended run
+    can't answer "does this match the real roster", so it must flag itself
+    for later instead of crashing or guessing."""
+
+    from scheduler_agents.flows.scheduler_flow import NeedsHumanAttention
+
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    monkeypatch.setattr(
+        "scheduler_agents.flows.scheduler_flow.parse_roster_image",
+        lambda path: (
+            [ScheduleEvent(date="2026-10-01", start_time="09:00", end_time="10:00", source="roster_image")],
+            "UK",
+        ),
+    )
+
+    def unattended_confirm(events, image_path):
+        raise NeedsHumanAttention("no interactive terminal")
+
+    flow = SchedulerFlow(
+        sample_email_path=_schedule_email(tmp_path),
+        roster_image_path=fake_image,
+        confirm_roster_events=unattended_confirm,
+    )
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.schedule_needs_attention is True
+    assert state.extracted_events == []
+    assert state.calendar_events == []

@@ -48,6 +48,7 @@ def build_flow(
     roster_image: Path | None = None,
     ask_user=None,
     ask_availability=None,
+    confirm_roster_events=None,
 ) -> SchedulerFlow:
     """Shared setup for a SchedulerFlow, used by both this CLI and the
     desktop app (desktop_app/flow_worker.py) so the two never drift apart --
@@ -76,6 +77,7 @@ def build_flow(
         roster_image_path=roster_image,
         ask_user=ask_user,
         ask_availability=ask_availability,
+        confirm_roster_events=confirm_roster_events,
     )
 
 
@@ -123,13 +125,18 @@ def main() -> None:
     print(f"Email type: {state.email_type}")
 
     if state.email_type == "schedule":
-        print(f"Extracted events: {len(state.extracted_events)}")
-        if state.roster_timezone_label:
-            print(f"Roster timezone label: {state.roster_timezone_label}")
-        print(f"Validation errors: {state.validation_errors}")
-        print(f"Calendar payloads: {len(state.calendar_events)}")
-        for event in state.calendar_events:
-            print(event)
+        if state.schedule_needs_attention:
+            print("ACTION NEEDED: roster events need you to confirm them against the real image --")
+            print("run this command yourself in an interactive terminal to respond:")
+            print("  uv run python -m scheduler_agents.main")
+        else:
+            print(f"Extracted events: {len(state.extracted_events)}")
+            if state.roster_timezone_label:
+                print(f"Roster timezone label: {state.roster_timezone_label}")
+            print(f"Validation errors: {state.validation_errors}")
+            print(f"Calendar payloads: {len(state.calendar_events)}")
+            for event in state.calendar_events:
+                print(event)
     elif state.email_type == "coverage_request":
         print(f"Coverage slots found: {len(state.coverage_slots)}")
         if state.coverage_needs_attention:

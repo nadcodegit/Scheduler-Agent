@@ -5,6 +5,32 @@ extract_schedule:
     Email:
     {email}
 
+    This is a reply-thread email. Only extract from the NEW content the
+    sender actually wrote in THIS message -- never from quoted history
+    further down (earlier messages in the thread, usually marked by
+    "On ... wrote:", a ">" prefix on each line, or simply repeated below
+    the new text). A quoted copy of the interpreter's own earlier reply is
+    common here and must be completely ignored for extraction, even though
+    it's technically still visible in the email body.
+
+    Do NOT confuse a general AVAILABILITY STATEMENT with a finalized
+    schedule row. "Available 7:00AM to 11:00AM UK time" describes a
+    recurring window the interpreter CAN work, not a specific date they
+    ARE scheduled -- do not turn a statement like that into one row per
+    day of the month, or any row at all. Only extract a row when the text
+    names an actual specific date (or day) paired with a specific time
+    range as a real commitment, not a range/availability description.
+
+    The real monthly schedule for this vendor relationship almost always
+    arrives as a roster screenshot image, not as text in the email body.
+    If the body's new content (excluding quoted history) has no genuine
+    dated schedule rows -- only commentary, a quoted availability
+    statement, or a reference to an attached image -- return an empty
+    array rather than inventing rows from whatever date/time-shaped text
+    happens to be present. An empty result here is expected and correct
+    when the real data is in an attachment; this project's own vision
+    fallback (not this task) handles that case.
+
     Return strict JSON records with only date, start_time, and end_time --
     the three things that actually vary per row. Do NOT include language,
     title, or source: this project automates one real vendor relationship
@@ -14,7 +40,8 @@ extract_schedule:
     guessed one. Use ISO date format YYYY-MM-DD and 24-hour HH:MM times.
   expected_output: >
     A JSON array of schedule event objects. Each object must include only
-    date, start_time, and end_time.
+    date, start_time, and end_time. An empty array is a valid, often
+    correct answer -- never invent rows to avoid returning one.
   agent: schedule_parser_agent
 
 validate_schedule:

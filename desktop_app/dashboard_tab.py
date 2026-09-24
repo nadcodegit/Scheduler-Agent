@@ -116,6 +116,7 @@ class DashboardTab(QWidget):
         self._worker = FlowWorker(self.project_root)
         self._worker.ask_coverage.connect(self._handle_ask_coverage)
         self._worker.ask_availability.connect(self._handle_ask_availability)
+        self._worker.ask_confirm_roster.connect(self._handle_ask_confirm_roster)
         self._worker.finished_ok.connect(self._handle_finished)
         self._worker.failed.connect(self._handle_failed)
         self._worker.start()
@@ -138,6 +139,32 @@ class DashboardTab(QWidget):
             f"What's your availability for {period or 'the requested period'}?",
         )
         self._worker.provide_availability_answer(text)
+
+    def _handle_ask_confirm_roster(self, events, roster_image_path) -> None:
+        # Opens the actual source image on screen before asking -- a vision
+        # model reading a roster grid has proven, in real testing, able to
+        # confidently misread which hour column a mark falls under, so this
+        # confirmation is only meaningful if she can see the real image
+        # right next to the question, not just a list of numbers.
+        if roster_image_path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(roster_image_path)))
+
+        by_date: dict[str, list[str]] = {}
+        for event in events:
+            by_date.setdefault(str(event.date), []).append(f"{event.start_time}-{event.end_time}")
+        lines = [f"{date}: {', '.join(times)}" for date, times in sorted(by_date.items())]
+        preview = "\n".join(lines[:15])
+        if len(lines) > 15:
+            preview += f"\n... and {len(lines) - 15} more day(s)"
+
+        answer = QMessageBox.question(
+            self,
+            "Confirm roster events",
+            f"Extracted {len(events)} event(s) from a roster screenshot -- "
+            f"the real image just opened for you to compare.\n\n{preview}\n\n"
+            "Does this actually match the real roster?",
+        )
+        self._worker.provide_roster_confirm_answer(answer == QMessageBox.StandardButton.Yes)
 
     def _handle_finished(self, summary: dict) -> None:
         self.check_button.setEnabled(True)

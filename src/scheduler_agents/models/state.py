@@ -117,6 +117,11 @@ class SchedulerFlowState(BaseModel):
     # came from vision extraction rather than email text. The roster's own
     # timezone can differ from the interpreter's default (UserMemory.timezone).
     roster_timezone_label: str | None = None
+    # True when a scheduled/unattended run (no interactive terminal) found
+    # vision-extracted roster events that need a human to confirm they
+    # actually match the source image before anything is saved -- same
+    # meaning as coverage_needs_attention/availability_needs_attention.
+    schedule_needs_attention: bool = False
 
     # Coverage-request workflow (V2)
     coverage_slots: list[CoverageSlot] = Field(default_factory=list)
