@@ -126,7 +126,9 @@ def main() -> None:
 
     if state.email_type == "schedule":
         if state.schedule_needs_attention:
-            print("ACTION NEEDED: roster events need you to confirm them against the real image --")
+            print("ACTION NEEDED: a roster screenshot needs your attention --")
+            print("either the extracted events need your confirmation, or the image")
+            print("couldn't be read this run (check the log above for a real error).")
             print("run this command yourself in an interactive terminal to respond:")
             print("  uv run python -m scheduler_agents.main")
         else:

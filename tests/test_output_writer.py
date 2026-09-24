@@ -83,6 +83,22 @@ def test_summarize_run_flags_needs_attention_over_any_other_summary():
     assert "attention" in summary["summary"]
 
 
+def test_summarize_run_distinguishes_a_failed_vision_call_from_an_unanswered_question():
+    """A roster-image read failure and "no interactive terminal to ask you"
+    are different situations -- the summary text must say which one, not
+    collapse them into the same generic "needs your attention"."""
+
+    state = _state_with_email(EmailType.SCHEDULE)
+    state.schedule_needs_attention = True
+    record_hook(state, "roster_image_parse_failed", error="rate_limited")
+
+    summary = summarize_run(state)
+
+    assert summary["needs_attention"] is True
+    assert "roster image couldn't be read" in summary["summary"].lower()
+    assert "rate_limited" in summary["summary"]
+
+
 def test_summarize_run_includes_whichever_gmail_draft_id_is_set():
     state = _state_with_email(EmailType.AVAILABILITY_REQUEST)
     state.availability_gmail_draft_id = "draft-9"

@@ -180,12 +180,26 @@ class DashboardTab(QWidget):
         self.refresh_status()
         self._on_run_finished()
         if summary.get("needs_attention"):
-            QMessageBox.information(
-                self,
-                "Action needed",
-                "This email needed an answer but no interactive prompt was available. "
-                "Check the History tab and re-run.",
-            )
+            if summary.get("email_type") == "schedule":
+                # In this app, a coverage/availability question always got a
+                # real dialog above (the GUI never has no one to ask) -- so
+                # for a schedule email specifically, needs_attention here
+                # means the roster image itself couldn't be read this run
+                # (a transient provider error), not an unanswered question.
+                QMessageBox.information(
+                    self,
+                    "Action needed",
+                    "The roster image couldn't be read this run (a live provider "
+                    "error, likely transient). Check History for the real error, "
+                    "then click \"Check email now\" again to retry.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Action needed",
+                    "This email needed an answer but no interactive prompt was available. "
+                    "Check the History tab and re-run.",
+                )
         elif summary.get("invoice_output_path"):
             name = Path(summary["invoice_output_path"]).name
             answer = QMessageBox.information(

@@ -20,11 +20,14 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
 
     source = "unknown"
     fetch_error: str | None = None
+    roster_parse_error: str | None = None
     for event in state.hooks:
         if event.name == "after_receive_email" and event.details.get("source") in ("gmail", "sample"):
             source = event.details["source"]
         elif event.name == "gmail_fetch_failed":
             fetch_error = str(event.details.get("error"))
+        elif event.name == "roster_image_parse_failed":
+            roster_parse_error = str(event.details.get("error"))
 
     email_type = str(state.email_type) if state.email_type else None
     needs_attention = (
@@ -34,7 +37,14 @@ def summarize_run(state: SchedulerFlowState) -> dict[str, Any]:
 
     conversation: dict[str, Any] | None = None
 
-    if needs_attention:
+    if needs_attention and email_type == "schedule" and roster_parse_error:
+        # Distinct from the generic "no interactive terminal" case below --
+        # this run never even got to asking a question, the roster image
+        # itself couldn't be read (a live vision-provider error, usually
+        # transient) -- worth a different message so it doesn't look
+        # identical to "you weren't around to answer."
+        summary = f"Roster image couldn't be read this run: {roster_parse_error}"
+    elif needs_attention:
         summary = "Needs your attention -- no interactive terminal was available to ask you."
     elif email_type == "schedule":
         summary = f"{len(state.extracted_events)} event(s) extracted, {len(state.validation_errors)} validation error(s)."

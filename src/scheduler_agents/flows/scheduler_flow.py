@@ -314,7 +314,14 @@ class SchedulerFlow(Flow[SchedulerFlowState]):
                     timezone_label=timezone_label,
                 )
             except Exception as exc:  # network/vision-model failures never crash the flow
+                # A failed vision call (rate limit, provider auth, etc.) is
+                # not the same thing as "genuinely no schedule data" -- the
+                # real roster is presumably still sitting in that image,
+                # just unread this run. Flagging it, same as an unanswered
+                # confirmation, means this looks different from "all clear"
+                # instead of silently indistinguishable from it.
                 record_hook(self.state, "roster_image_parse_failed", error=str(exc))
+                self.state.schedule_needs_attention = True
 
             # Vision-extracted events, specifically, always get a human
             # confirmation before anything downstream can save them -- see

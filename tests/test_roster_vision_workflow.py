@@ -462,3 +462,30 @@ def test_roster_confirmation_flags_needs_attention_when_unattended(
     assert state.schedule_needs_attention is True
     assert state.extracted_events == []
     assert state.calendar_events == []
+
+
+def test_a_failed_vision_call_flags_needs_attention_instead_of_looking_like_no_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A transient provider failure (rate limit, auth, etc.) must not look
+    identical to "genuinely no schedule data" -- confirmed live: it silently
+    did, right up until this fix. The real roster is presumably still
+    sitting in that image, just unread this particular run."""
+
+    monkeypatch.delenv("MODEL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    def failing_parse(path):
+        raise RuntimeError("All configured vision providers failed -- rate_limited")
+
+    monkeypatch.setattr("scheduler_agents.flows.scheduler_flow.parse_roster_image", failing_parse)
+
+    flow = SchedulerFlow(sample_email_path=_schedule_email(tmp_path), roster_image_path=fake_image)
+    state = asyncio.run(flow.run_v1_async())
+
+    assert state.schedule_needs_attention is True
+    assert state.extracted_events == []
+    assert any(hook.name == "roster_image_parse_failed" for hook in state.hooks)
