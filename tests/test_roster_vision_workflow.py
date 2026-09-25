@@ -61,7 +61,7 @@ def test_resolve_timezone_falls_back_when_label_is_none():
 
 
 def test_is_vision_configured_reflects_any_candidate_provider(monkeypatch: pytest.MonkeyPatch):
-    for env_var in ("GROQ_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+    for env_var in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(env_var, raising=False)
     assert is_vision_configured() is False
 
@@ -72,7 +72,7 @@ def test_is_vision_configured_reflects_any_candidate_provider(monkeypatch: pytes
 def test_parse_roster_image_raises_without_any_provider_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    for env_var in ("GROQ_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+    for env_var in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(env_var, raising=False)
     fake_image = tmp_path / "roster.png"
     fake_image.write_bytes(b"not a real png, just needs to exist")
@@ -159,6 +159,61 @@ def test_parse_roster_image_falls_back_to_next_provider_on_failure(
     events, timezone_label = parse_roster_image(fake_image)
 
     assert calls == ["groq/qwen/qwen3.8-27b", "gpt-4o-mini"]  # tried Groq first, fell back to OpenAI
+    assert timezone_label == "UK"
+    assert len(events) == 1
+
+
+def test_parse_roster_image_tries_openrouter_first_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """OpenRouter's dots-3-note-preview goes first among the candidates --
+    verified live against a real roster screenshot to actually read the
+    grid correctly, unlike Groq's qwen3.8-27b (see roster_vision_tool.py).
+    """
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key")
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    payload = {"timezone_label": "UK", "events": [{"date": "2026-05-01", "start_time": "09:00", "end_time": "10:00"}]}
+    calls: list[str] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs["model"])
+        return _FakeResponse(json_lib.dumps(payload))
+
+    monkeypatch.setattr("scheduler_agents.tools.roster_vision_tool.litellm.completion", fake_completion)
+
+    events, timezone_label = parse_roster_image(fake_image)
+
+    assert calls == ["openrouter/dots-studio/dots-3-note-preview:free"]
+    assert timezone_label == "UK"
+    assert len(events) == 1
+
+
+def test_parse_roster_image_falls_back_from_openrouter_to_groq_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key")
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    fake_image = tmp_path / "roster.png"
+    fake_image.write_bytes(b"fake")
+
+    payload = {"timezone_label": "UK", "events": [{"date": "2026-05-01", "start_time": "09:00", "end_time": "10:00"}]}
+    calls: list[str] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs["model"])
+        if kwargs["model"].startswith("openrouter/"):
+            raise RuntimeError("upstream provider error")
+        return _FakeResponse(json_lib.dumps(payload))
+
+    monkeypatch.setattr("scheduler_agents.tools.roster_vision_tool.litellm.completion", fake_completion)
+
+    events, timezone_label = parse_roster_image(fake_image)
+
+    assert calls == ["openrouter/dots-studio/dots-3-note-preview:free", "groq/qwen/qwen3.8-27b"]
     assert timezone_label == "UK"
     assert len(events) == 1
 

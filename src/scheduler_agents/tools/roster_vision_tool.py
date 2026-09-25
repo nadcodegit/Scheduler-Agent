@@ -29,10 +29,19 @@ from scheduler_agents.tools.llm_json import strip_code_fence
 # path in this project already has (LLM -> regex); a roster screenshot has
 # no parseable text, so the fallback has to be across vision providers
 # instead.
-_VISION_MODEL_CANDIDATES: list[tuple[str, str]] = [
-    ("GROQ_API_KEY", "groq/qwen/qwen3.8-27b"),
-    ("OPENAI_API_KEY", "gpt-4o-mini"),
-    ("GEMINI_API_KEY", "gemini/gemini-3.6-flash"),
+#
+# OpenRouter's dots-3-note-preview goes first: it's a "reasoning" model
+# (thinks before answering, hence the much larger max_tokens below -- 4096
+# only leaves room for the thinking and truncates before any JSON comes
+# out) that, unlike Groq's qwen3.8-27b, actually read this project's real
+# roster grid correctly -- verified live twice against the real screenshot,
+# both times landing on the exact right total (61 scheduled hours) with
+# identical output at temperature=0. Free tier, same as Groq's.
+_VISION_MODEL_CANDIDATES: list[tuple[str, str, int]] = [
+    ("OPENROUTER_API_KEY", "openrouter/dots-studio/dots-3-note-preview:free", 24000),
+    ("GROQ_API_KEY", "groq/qwen/qwen3.8-27b", 4096),
+    ("OPENAI_API_KEY", "gpt-4o-mini", 4096),
+    ("GEMINI_API_KEY", "gemini/gemini-3.6-flash", 4096),
 ]
 
 # Abbreviations actually seen in roster column headers. Extend as new ones
@@ -77,7 +86,7 @@ year that makes the month closest to today's date. Use 24-hour HH:MM times."""
 
 
 def is_vision_configured() -> bool:
-    return any(os.getenv(env_var) for env_var, _ in _VISION_MODEL_CANDIDATES)
+    return any(os.getenv(env_var) for env_var, _, _ in _VISION_MODEL_CANDIDATES)
 
 
 def resolve_timezone(label: str | None, default: str) -> str:
@@ -86,7 +95,9 @@ def resolve_timezone(label: str | None, default: str) -> str:
     return _TIMEZONE_LABELS.get(label.strip().upper(), default)
 
 
-def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str, api_key: str) -> dict[str, Any]:
+def _call_vision_model(
+    model: str, prompt: str, mime: str, image_b64: str, api_key: str, max_tokens: int
+) -> dict[str, Any]:
     # api_key is passed explicitly rather than left for litellm to pick up
     # from the GEMINI_API_KEY env var on its own -- verified live, those two
     # paths are NOT equivalent for Gemini: relying on the env var routed
@@ -104,13 +115,17 @@ def _call_vision_model(model: str, prompt: str, mime: str, image_b64: str, api_k
         # finish_reason "length") even though it never showed up against the
         # small 5-event demo fixture used for earlier testing. 4096 is
         # already far more than a real month's JSON output ever actually
-        # needs (a 46-event synthetic roster used well under half of it) --
-        # deliberately not higher: Groq's on-demand tier rejects a request
-        # outright once (image input tokens + max_tokens) exceeds its flat
-        # 8000 TPM cap, verified live against the small demo roster image --
-        # this isn't the rolling rate-limit window from the retry logic
-        # below, it's a hard per-request ceiling no amount of waiting fixes.
-        "max_tokens": 4096,
+        # needs for a plain (non-reasoning) model -- deliberately not higher
+        # for those: Groq's on-demand tier rejects a request outright once
+        # (image input tokens + max_tokens) exceeds its flat 8000 TPM cap,
+        # verified live against the small demo roster image -- this isn't
+        # the rolling rate-limit window from the retry logic below, it's a
+        # hard per-request ceiling no amount of waiting fixes. A "reasoning"
+        # model (OpenRouter's dots-3-note-preview) needs far more room --
+        # its chain-of-thought alone burns past 4096 before it ever reaches
+        # the JSON answer, verified live (finish_reason "length" with empty
+        # content) -- hence per-candidate max_tokens instead of one constant.
+        "max_tokens": max_tokens,
         "messages": [
             {
                 "role": "user",
@@ -136,9 +151,11 @@ def parse_roster_image(path: Path) -> tuple[list[ScheduleEvent], str | None]:
     used for the CrewAI LLM path.
     """
 
-    configured = [(env_var, model) for env_var, model in _VISION_MODEL_CANDIDATES if os.getenv(env_var)]
+    configured = [
+        (env_var, model, max_tokens) for env_var, model, max_tokens in _VISION_MODEL_CANDIDATES if os.getenv(env_var)
+    ]
     if not configured:
-        names = ", ".join(env_var for env_var, _ in _VISION_MODEL_CANDIDATES)
+        names = ", ".join(env_var for env_var, _, _ in _VISION_MODEL_CANDIDATES)
         raise RuntimeError(f"No vision-capable provider configured; roster image extraction needs one of: {names}.")
 
     mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
@@ -155,10 +172,12 @@ def parse_roster_image(path: Path) -> tuple[list[ScheduleEvent], str | None]:
     # was failing on a retired model id, but the surfaced error was only
     # Gemini's unrelated auth failure, since Gemini was tried last.
     errors_by_provider: list[str] = []
-    for env_var, model in configured:
+    for env_var, model, max_tokens in configured:
         for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
             try:
-                data = _call_vision_model(model, prompt, mime, image_b64, api_key=os.getenv(env_var, ""))
+                data = _call_vision_model(
+                    model, prompt, mime, image_b64, api_key=os.getenv(env_var, ""), max_tokens=max_tokens
+                )
                 break
             except litellm.RateLimitError as exc:
                 last_error = exc

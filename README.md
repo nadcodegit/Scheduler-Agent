@@ -2,7 +2,7 @@
 
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
 ![CrewAI Flow](https://img.shields.io/badge/orchestration-CrewAI%20Flow-6f42c1)
-![Tests](https://img.shields.io/badge/tests-131%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-135%20passing-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 CrewAI-based portfolio project for automating interpreter schedule workflows.
@@ -247,10 +247,14 @@ single-shot "describe this image as JSON" call rather than multi-step
 reasoning. A roster screenshot has no parseable text, so there's no regex
 fallback possible here the way every other extraction path has one --
 instead, `parse_roster_image` tries each of several curated
-known-vision-capable models in priority order (Groq's `qwen/qwen3.6-27b`,
-then `gpt-4o-mini`, then Gemini's `gemini-3.6-flash` -- Google retired
+known-vision-capable models in priority order (OpenRouter's free
+`dots-studio/dots-3-note-preview`, then Groq's `qwen/qwen3.8-27b`, then
+`gpt-4o-mini`, then Gemini's `gemini-3.6-flash` -- Google retired
 `gemini-2.0-flash` since this was first written; see below) until one succeeds,
-skipping straight to the next configured candidate on failure. This is
+skipping straight to the next configured candidate on failure. The
+OpenRouter model goes first: it's the one candidate verified live to
+actually read this project's real roster grid correctly (see item 20 in
+"Next Steps"); the others stay as fallbacks in case it's ever unavailable. This is
 deliberately not the same `MODEL` env var every other LLM call in this
 project follows -- `MODEL` is usually chosen for classification/coverage
 text tasks and isn't necessarily vision-capable. It also reads the roster's
@@ -995,6 +999,23 @@ backfill in `validate_schedule` in case a model sends one anyway.
     `extraction_tasks.yaml` the same way `classify_tasks.yaml` was already
     hardened: ignore quoted history, don't turn an availability statement
     into dated rows, prefer an empty result over inventing one.
+20. ~~The confirmation gate stops bad data from being saved, but the
+    underlying vision model still misreads the grid every time~~ -- found
+    a genuinely more reliable *free* alternative: OpenRouter's
+    `dots-studio/dots-3-note-preview:free`, a reasoning model, now tried
+    first in `_VISION_MODEL_CANDIDATES` (Groq's qwen3.8-27b stays as the
+    fallback). Verified live against the real roster screenshot twice at
+    temperature=0 -- both runs landed on the exact right total (61
+    scheduled hours) with identical output, unlike Groq's
+    non-deterministic wrong answers. Needed a much larger `max_tokens`
+    (24000 vs. the other candidates' 4096): as a reasoning model it spends
+    tokens "thinking" before writing the JSON answer, and 4096 was enough
+    room for the thinking alone to hit `finish_reason: "length"` with an
+    empty response -- `_VISION_MODEL_CANDIDATES` now carries a per-model
+    `max_tokens` instead of one constant. The human-confirmation gate from
+    item 19 stays in place regardless -- a more reliable model reduces how
+    often she'll need to correct it, it doesn't remove the need for the
+    safety net.
 
 ## Course-Style CrewAI Pieces
 
