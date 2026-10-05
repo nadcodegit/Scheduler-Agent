@@ -168,6 +168,25 @@ class DashboardTab(QWidget):
 
     def _handle_finished(self, summary: dict) -> None:
         self.check_button.setEnabled(True)
+        if summary.get("fetch_error"):
+            # A failed Gmail login (typically the ~7-day expiry of a
+            # Testing-mode OAuth token) also lands here as source != "gmail",
+            # and used to be reported as "no new email found" -- hiding that
+            # the app can't read her mailbox at all.
+            self.status_label.setText(
+                "Can't read your Gmail -- the login expired. Re-authenticate (see the message), then check again."
+            )
+            _set_status_style(self.status_label, "attention")
+            QMessageBox.warning(
+                self,
+                "Gmail login expired",
+                "The app couldn't read your Gmail:\n\n"
+                f"{summary['fetch_error']}\n\n"
+                "Google expires this app's login every ~7 days. Delete token.json in the "
+                "project folder, then run this once in a terminal and approve the browser "
+                "prompt:\n\n  .venv\\Scripts\\python.exe -m scheduler_agents.main",
+            )
+            return
         if summary.get("source") != "gmail":
             # Nothing was written to history (append_run_history skips a
             # sample-fallback run on purpose -- see its docstring), so
